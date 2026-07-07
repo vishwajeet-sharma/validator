@@ -1,0 +1,32 @@
+# --- Compiled binaries (output of `go build`) ---
+/validator-backend
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# --- Go test & coverage artifacts ---
+*.out
+*.prof
+*.test
+coverage.html
+
+# --- Vendored dependencies (not used) ---
+/vendor/
+
+# --- Environment files (keep .env.example tracked) ---
+.env
+.env.*
+!.env.example
+
+# --- Editor / IDE ---
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# --- OS ---
+.DS_Store
+Thumbs.db
