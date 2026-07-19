@@ -1,56 +1,71 @@
-export type Platform = 'reddit' | 'youtube' | 'social' | 'news' | 'custom';
+// Domain types mirroring the backend DTOs (internal/api/dto.go). Both sides
+// use camelCase so the JSON contract is 1:1.
 
-export type ScoutingFrequency = '3days' | '7days' | '14days';
+export type ScoutType = 'PRO' | 'CON';
+export type ScoutStatus = 'ACTIVE' | 'PENDING_MUTATION' | 'UNDEPLOYED' | 'STOPPED';
+export type IdeaStatus = 'INITIAL_SWEEP' | 'ACTIVE';
+export type ProposalStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
 
-export interface CustomChannel {
+export interface Proposal {
   id: string;
-  url: string;
-  label: string;
+  proposedPrompt: string;
+  status: ProposalStatus;
+  createdAt: string;
+}
+
+export interface Scout {
+  id: string;
+  scoutType: ScoutType;
+  status: ScoutStatus;
+  currentPrompt: string;
+  pendingProposal?: Proposal;
 }
 
 export interface Finding {
   id: string;
-  platform: Platform;
+  polarity: ScoutType;
+  platform: string;
   quote: string;
   reason: string;
   sourceUrl: string;
   sourceTitle: string;
+  createdAt: string;
 }
 
-export interface ScoutCycle {
-  id: string;
-  day: number;
-  label: string;
-  date: string;
-  pros: Finding[];
-  cons: Finding[];
-}
-
-export interface Idea {
+export interface IdeaSummary {
   id: string;
   title: string;
   description: string;
-  keywords: string[];
   scoutingFrequencyDays: number;
-  channels: Platform[];
-  customChannels: CustomChannel[];
-  createdAt: string;
-  lastUpdated: string;
+  status: IdeaStatus;
   totalPros: number;
   totalCons: number;
-  newSignalsToday: number;
-  status: IdeaStatus;
-  statusMessage: string;
-  cycles: ScoutCycle[];
+  proScoutStatus: ScoutStatus;
+  conScoutStatus: ScoutStatus;
+  createdAt: string;
+  lastUpdated: string;
 }
 
-export type IdeaStatus = 'stable' | 'expanded' | 'pending';
+export interface IdeaDetail extends IdeaSummary {
+  scouts: Scout[];
+  recentPros: Finding[];
+  recentCons: Finding[];
+}
 
 export interface NewIdeaForm {
-  title: string;
   description: string;
-  keywords: string[];
   scoutingFrequencyDays: number;
-  channels: Platform[];
-  customChannels: CustomChannel[];
+}
+
+export interface CreateIdeaResponse {
+  id: string;
+  status: string;
+  workflowId: string;
+}
+
+export type ProposalAction = 'APPROVE' | 'REJECT';
+
+export interface ProposalResponseRequest {
+  action: ProposalAction;
+  edited_text?: string;
 }

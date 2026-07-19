@@ -1,303 +1,355 @@
-// Package api implements the public REST ingress layer for the Validator
-// platform: idea creation (which also kicks off the durable workflow) and the
-// compiled LLM-payload endpoint.
 package api
 
 import (
-	"context"
-	"encoding/json"
-	"errors"
-	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"strings"
 
 	"github.com/google/uuid"
 
-	restateingress "github.com/restatedev/sdk-go/ingress"
-
-	"validator-backend/internal/db"
 	"validator-backend/internal/models"
 	"validator-backend/internal/workflow"
 )
 
-// Server wires together the database store and the Restate ingress client used
-// to trigger the MarketValidationWorkflow.
-type Server struct {
-	DB            *db.Store
-	IngressClient *restateingress.Client
-}
-
-// NewServer returns a configured Server.
-func NewServer(store *db.Store, ingress *restateingress.Client) *Server {
-	return &Server{DB: store, IngressClient: ingress}
-}
-
-// Routes returns an http.Handler with all REST endpoints registered.
-func (s *Server) Routes() http.Handler {
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /api/ideas", s.handleListIdeas)
-	mux.HandleFunc("POST /api/ideas", s.handlePostIdea)
-	mux.HandleFunc("GET /api/ideas/{id}", s.handleGetIdea)
-	mux.HandleFunc("GET /api/ideas/{id}/payload", s.handleGetPayload)
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-	})
-	return s.withCORS(s.withLogging(mux))
-}
-
-// createIdeaRequest is the JSON body for POST /api/ideas. Field names mirror the
-// UI's NewIdeaForm (camelCase); unknown fields are ignored for forward-compat.
+// createIdeaRequest is the JSON body for POST /api/ideas.
 type createIdeaRequest struct {
-	Title                 string                 `json:"title"`
-	Description           string                 `json:"description"`
-	ScoutingFrequencyDays int                    `json:"scoutingFrequencyDays"`
-	Keywords              []string               `json:"keywords"`
-	Channels              []string               `json:"channels"`
-	CustomChannels        []models.CustomChannel `json:"customChannels"`
+	Title                 *string `json:"title,omitempty"`
+	Description           string  `json:"description"`
+	ScoutingFrequencyDays int     `json:"scoutingFrequencyDays"`
 }
 
-// createIdeaResponse is returned on successful idea creation.
-type createIdeaResponse struct {
-	Idea       IdeaDTO `json:"idea"`
-	WorkflowID string  `json:"workflow_id"`
-	Invocation string  `json:"invocation_id,omitempty"`
-}
+// handlePostIdea persists a new idea and asynchronously starts the Day 0 setup
+// workflow. Returns 202 Accepted.
+func (s *Server) handlePostIdea(w http.ResponseWriter, r *http.Request) {
+	var req createIdeaRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
+		return
+	}
+	desc := strings.TrimSpace(req.Description)
+	if desc == "" {
+		writeError(w, http.StatusBadRequest, "description is required")
+		return
+	}
+	if req.ScoutingFrequencyDays <= 0 {
+		req.ScoutingFrequencyDays = 7
+	}
 
-// handleListIdeas returns every tracked idea with its embedded scout cycles.
-func (s *Server) handleListIdeas(w http.ResponseWriter, r *http.Request) {
-	ideas, err := s.DB.ListIdeas(r.Context())
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "list ideas: %v", err)
+	title := ""
+	if req.Title != nil && strings.TrimSpace(*req.Title) != "" {
+		title = strings.TrimSpace(*req.Title)
+	} else {
+		title = deriveTitle(desc)
+	}
+
+	idea := &models.Idea{
+		ID:            uuid.NewString(),
+		Title:         title,
+		Description:   desc,
+		FrequencyDays: req.ScoutingFrequencyDays,
+		Status:        models.IdeaStatusInitialSweep,
+	}
+	if err := s.DB.CreateIdea(r.Context(), idea); err != nil {
+		slog.Error("persist idea failed", "err", err)
+		writeError(w, http.StatusInternalServerError, "could not persist idea")
 		return
 	}
 
+	// Fire-and-forget the Day 0 workflow; trigger failures never fail the HTTP
+	// request because the idea is already persisted and can be retried.
+	_ = s.triggerDay0(idea.ID, idea.Title, idea.Description, idea.FrequencyDays)
+
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"id":         idea.ID,
+		"status":     string(idea.Status),
+		"workflowId": idea.ID,
+	})
+}
+
+// handleListIdeas returns all tracked ideas with their scout statuses.
+func (s *Server) handleListIdeas(w http.ResponseWriter, r *http.Request) {
+	ideas, err := s.DB.ListIdeas(r.Context())
+	if err != nil {
+		slog.Error("list ideas failed", "err", err)
+		writeError(w, http.StatusInternalServerError, "could not load ideas")
+		return
+	}
 	ids := make([]string, 0, len(ideas))
 	for _, i := range ideas {
 		ids = append(ids, i.ID)
 	}
-	runsByIdea, err := s.DB.GetScoutRunsByIdeaIDs(r.Context(), ids)
+	scoutsByIdea, err := s.DB.GetScoutsByIdeaIDs(r.Context(), ids)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "load scout runs: %v", err)
-		return
-	}
-	signalsByIdea, err := s.DB.GetSignalsByIdeaIDs(r.Context(), ids)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "load signals: %v", err)
+		slog.Error("load scouts failed", "err", err)
+		writeError(w, http.StatusInternalServerError, "could not load scouts")
 		return
 	}
 
-	out := make([]IdeaDTO, 0, len(ideas))
+	out := make([]IdeaSummaryDTO, 0, len(ideas))
 	for _, idea := range ideas {
-		out = append(out, BuildIdeaDTO(idea, runsByIdea[idea.ID], signalsByIdea[idea.ID]))
+		scouts := scoutsByIdea[idea.ID]
+		out = append(out, IdeaSummaryDTO{
+			ID:                    idea.ID,
+			Title:                 idea.Title,
+			Description:           idea.Description,
+			ScoutingFrequencyDays: idea.FrequencyDays,
+			Status:                string(idea.Status),
+			TotalPros:             idea.TotalPros,
+			TotalCons:             idea.TotalCons,
+			ProScoutStatus:        scoutStatusFor(scouts, models.ScoutTypePro),
+			ConScoutStatus:        scoutStatusFor(scouts, models.ScoutTypeCon),
+			CreatedAt:             rfc3339(idea.CreatedAt),
+			LastUpdated:           rfc3339(idea.UpdatedAt),
+		})
 	}
 	writeJSON(w, http.StatusOK, out)
 }
 
-// handleGetIdea returns a single idea with all of its scout cycles assembled.
+// handleGetIdea returns a single idea with its scouts and recent findings.
 func (s *Server) handleGetIdea(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if id == "" {
 		writeError(w, http.StatusBadRequest, "missing idea id")
 		return
 	}
-
 	idea, err := s.DB.GetIdea(r.Context(), id)
 	if err != nil {
-		if errors.Is(err, db.ErrNotFound) {
+		if notFound(err) {
 			writeError(w, http.StatusNotFound, "idea not found")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "load idea: %v", err)
+		slog.Error("get idea failed", "err", err)
+		writeError(w, http.StatusInternalServerError, "could not load idea")
+		return
+	}
+	scouts, err := s.DB.GetScoutsByIdea(r.Context(), id)
+	if err != nil {
+		slog.Error("get scouts failed", "err", err)
+		writeError(w, http.StatusInternalServerError, "could not load scouts")
+		return
+	}
+	signals, err := s.DB.GetSignalsByIdea(r.Context(), id)
+	if err != nil {
+		slog.Error("get signals failed", "err", err)
+		writeError(w, http.StatusInternalServerError, "could not load signals")
 		return
 	}
 
-	runsByIdea, err := s.DB.GetScoutRunsByIdeaIDs(r.Context(), []string{id})
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "load scout runs: %v", err)
-		return
+	scoutIDs := make([]string, 0, len(scouts))
+	for _, sc := range scouts {
+		scoutIDs = append(scoutIDs, sc.ID)
 	}
-	signalsByIdea, err := s.DB.GetSignalsByIdeaIDs(r.Context(), []string{id})
+	proposals, err := s.DB.GetPendingProposalsByScoutIDs(r.Context(), scoutIDs)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "load signals: %v", err)
+		slog.Error("get proposals failed", "err", err)
+		writeError(w, http.StatusInternalServerError, "could not load proposals")
 		return
 	}
 
-	writeJSON(w, http.StatusOK, BuildIdeaDTO(idea, runsByIdea[id], signalsByIdea[id]))
+	pros, cons := splitSignals(signals, 20)
+	detail := IdeaDetailDTO{
+		IdeaSummaryDTO: IdeaSummaryDTO{
+			ID:                    idea.ID,
+			Title:                 idea.Title,
+			Description:           idea.Description,
+			ScoutingFrequencyDays: idea.FrequencyDays,
+			Status:                string(idea.Status),
+			TotalPros:             idea.TotalPros,
+			TotalCons:             idea.TotalCons,
+			ProScoutStatus:        scoutStatusFor(scouts, models.ScoutTypePro),
+			ConScoutStatus:        scoutStatusFor(scouts, models.ScoutTypeCon),
+			CreatedAt:             rfc3339(idea.CreatedAt),
+			LastUpdated:           rfc3339(idea.UpdatedAt),
+		},
+		Scouts:     scoutsForDetail(scouts, proposals),
+		RecentPros: pros,
+		RecentCons: cons,
+	}
+	writeJSON(w, http.StatusOK, detail)
 }
 
-// handlePostIdea persists a new idea and asynchronously starts the durable
-// MarketValidationWorkflow via the Restate ingress.
-func (s *Server) handlePostIdea(w http.ResponseWriter, r *http.Request) {
-	var req createIdeaRequest
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body: %v", err)
-		return
-	}
-
-	if strings.TrimSpace(req.Title) == "" || strings.TrimSpace(req.Description) == "" {
-		writeError(w, http.StatusBadRequest, "title and description are required")
-		return
-	}
-	if len(req.Keywords) == 0 {
-		writeError(w, http.StatusBadRequest, "at least one keyword is required")
-		return
-	}
-	if req.ScoutingFrequencyDays <= 0 {
-		req.ScoutingFrequencyDays = 7
-	}
-	if len(req.Channels) == 0 {
-		req.Channels = []string{
-			string(models.PlatformReddit),
-			string(models.PlatformYoutube),
-			string(models.PlatformNews),
-		}
-	}
-
-	idea := &models.Idea{
-		ID:             uuid.NewString(),
-		Title:          strings.TrimSpace(req.Title),
-		Description:    strings.TrimSpace(req.Description),
-		FrequencyDays:  req.ScoutingFrequencyDays,
-		Keywords:       req.Keywords,
-		Channels:       req.Channels,
-		CustomChannels: req.CustomChannels,
-		Status:         "pending",
-		StatusMessage:  "Initial scout run pending",
-	}
-
-	if err := s.DB.CreateIdea(r.Context(), idea); err != nil {
-		writeError(w, http.StatusInternalServerError, "persist idea: %v", err)
-		return
-	}
-
-	// Asynchronously trigger the long-running workflow keyed by idea id.
-	invocationID := s.triggerWorkflow(r.Context(), idea)
-
-	writeJSON(w, http.StatusCreated, createIdeaResponse{
-		Idea:       BuildIdeaDTO(idea, nil, nil),
-		WorkflowID: idea.ID,
-		Invocation: invocationID,
-	})
+// proposalResponse is the JSON body for POST /api/proposals/{id}/respond.
+type proposalResponse struct {
+	Action     string  `json:"action"`
+	EditedText *string `json:"edited_text,omitempty"`
 }
 
-// triggerWorkflow fires-and-forgets the MarketValidationWorkflow via the Restate
-// ingress. The workflow id mirrors the idea id so each idea is tracked by
-// exactly one workflow instance. Trigger failures are logged but never fail the
-// HTTP request, since the idea has already been persisted and can be retried.
-func (s *Server) triggerWorkflow(ctx context.Context, idea *models.Idea) string {
-	if s.IngressClient == nil {
-		slog.Warn("ingress client not configured; workflow not started", "idea_id", idea.ID)
-		return ""
-	}
-
-	input := &workflow.WorkflowInput{
-		IdeaID:          idea.ID,
-		InitialKeywords: idea.Keywords,
-		IntervalDays:    idea.FrequencyDays,
-	}
-
-	resp, err := restateingress.WorkflowSend[*workflow.WorkflowInput](
-		s.IngressClient, workflow.ServiceName, idea.ID, "Run",
-	).Send(ctx, input)
-	if err != nil {
-		slog.Error("failed to start validation workflow",
-			"idea_id", idea.ID, "err", err)
-		return ""
-	}
-
-	slog.Info("validation workflow started",
-		"idea_id", idea.ID, "invocation_id", resp.Id())
-	return resp.Id()
-}
-
-// handleGetPayload compiles the latest scout cycle for an idea into the clean
-// markdown "Copy to LLM" payload.
-func (s *Server) handleGetPayload(w http.ResponseWriter, r *http.Request) {
+// handleRespondProposal applies a human APPROVE/REJECT decision. On approve it
+// updates the scout prompt in the DB and forwards a Yutori PATCH to the worker.
+func (s *Server) handleRespondProposal(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if id == "" {
-		writeError(w, http.StatusBadRequest, "missing idea id")
+		writeError(w, http.StatusBadRequest, "missing proposal id")
+		return
+	}
+	var req proposalResponse
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
+		return
+	}
+	action := strings.ToUpper(strings.TrimSpace(req.Action))
+	if action != "APPROVE" && action != "REJECT" {
+		writeError(w, http.StatusBadRequest, "action must be APPROVE or REJECT")
 		return
 	}
 
-	idea, err := s.DB.GetIdea(r.Context(), id)
+	proposal, err := s.DB.GetProposal(r.Context(), id)
 	if err != nil {
-		if errors.Is(err, db.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "idea not found")
+		if notFound(err) {
+			writeError(w, http.StatusNotFound, "proposal not found")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "load idea: %v", err)
+		slog.Error("get proposal failed", "err", err)
+		writeError(w, http.StatusInternalServerError, "could not load proposal")
+		return
+	}
+	if proposal.Status != models.ProposalPending {
+		writeError(w, http.StatusConflict, "proposal has already been resolved")
 		return
 	}
 
-	run, err := s.DB.GetLatestScoutRun(r.Context(), id)
-	if err != nil && !errors.Is(err, db.ErrNotFound) {
-		writeError(w, http.StatusInternalServerError, "load latest scout run: %v", err)
+	if action == "REJECT" {
+		if err := s.DB.ResolveProposal(r.Context(), id, models.ProposalRejected); err != nil {
+			slog.Error("reject proposal failed", "err", err)
+			writeError(w, http.StatusInternalServerError, "could not reject proposal")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "REJECTED"})
 		return
 	}
 
-	var signals []models.MarketSignal
-	if run != nil {
-		signals, err = s.DB.GetSignalsByRun(r.Context(), run.ID)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "load signals: %v", err)
-			return
-		}
+	// APPROVE: choose the final prompt text.
+	newPrompt := proposal.ProposedPrompt
+	if req.EditedText != nil && strings.TrimSpace(*req.EditedText) != "" {
+		newPrompt = strings.TrimSpace(*req.EditedText)
 	}
 
-	payload := BuildLLMPayload(idea, run, signals)
-	slog.Info("payload generated", "idea_id", id, "signals", len(signals))
+	scout, err := s.DB.GetScout(r.Context(), proposal.ScoutID)
+	if err != nil {
+		slog.Error("get scout for proposal failed", "err", err)
+		writeError(w, http.StatusInternalServerError, "could not load scout")
+		return
+	}
 
-	writeJSON(w, http.StatusOK, map[string]string{"payload": payload})
-}
+	if err := s.DB.UpdateScoutPrompt(r.Context(), scout.ID, newPrompt); err != nil {
+		slog.Error("update scout prompt failed", "err", err)
+		writeError(w, http.StatusInternalServerError, "could not update scout prompt")
+		return
+	}
+	if err := s.DB.ResolveProposal(r.Context(), id, models.ProposalApproved); err != nil {
+		slog.Error("approve proposal failed", "err", err)
+		writeError(w, http.StatusInternalServerError, "could not approve proposal")
+		return
+	}
 
-// withLogging wraps the handler with minimal request logging.
-func (s *Server) withLogging(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		next.ServeHTTP(w, r)
-		slog.Info("http request",
-			"method", r.Method, "path", r.URL.Path, "remote", r.RemoteAddr)
+	// Forward the Yutori PATCH to the worker (fire-and-forget).
+	_ = s.applyApproval(workflow.ApprovalInput{
+		ProposalID:    id,
+		ScoutID:       scout.ID,
+		YutoriScoutID: scout.YutoriScoutID,
+		NewPrompt:     newPrompt,
 	})
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "APPROVED"})
 }
 
-// withCORS adds permissive CORS headers so the browser-served UI (e.g. the Vite
-// dev server on another origin) can call the API directly. Preflight OPTIONS
-// requests are short-circuited with a 204.
-func (s *Server) withCORS(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		h := w.Header()
-		h.Set("Access-Control-Allow-Origin", "*")
-		h.Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		h.Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-		h.Set("Access-Control-Max-Age", "600")
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusNoContent)
+// handleDeleteScout stops a scout: marks it STOPPED in the DB synchronously,
+// then fire-and-forgets a worker call to DELETE it on Yutori (which is what
+// actually halts recurring credit consumption). The scout's pending proposals,
+// if any, are resolved as rejected since they can no longer be applied.
+func (s *Server) handleDeleteScout(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "missing scout id")
+		return
+	}
+	scout, err := s.DB.GetScout(r.Context(), id)
+	if err != nil {
+		if notFound(err) {
+			writeError(w, http.StatusNotFound, "scout not found")
 			return
 		}
-		next.ServeHTTP(w, r)
-	})
-}
-
-// --- encoding / response helpers -------------------------------------------
-
-func decodeJSON(r *http.Request, dst any) error {
-	dec := json.NewDecoder(r.Body)
-	// Unknown fields are intentionally allowed so the API stays tolerant of
-	// additive changes to the client payload.
-	defer r.Body.Close() //nolint:errcheck
-	return dec.Decode(dst)
-}
-
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
-}
-
-func writeError(w http.ResponseWriter, status int, format string, args ...any) {
-	msg := format
-	if len(args) > 0 {
-		msg = fmt.Sprintf(format, args...)
+		slog.Error("get scout failed", "err", err)
+		writeError(w, http.StatusInternalServerError, "could not load scout")
+		return
 	}
-	writeJSON(w, status, map[string]string{"error": strings.TrimSpace(msg)})
+	if scout.Status == models.ScoutStatusStopped {
+		writeJSON(w, http.StatusOK, map[string]string{"status": "STOPPED"})
+		return
+	}
+
+	if err := s.DB.SetScoutStatus(r.Context(), id, models.ScoutStatusStopped); err != nil {
+		slog.Error("stop scout failed", "err", err)
+		writeError(w, http.StatusInternalServerError, "could not stop scout")
+		return
+	}
+
+	// Forward the Yutori delete to the worker (fire-and-forget). The DB is
+	// already stopped, so a delayed/failed Yutori delete does not leave the
+	// user able to act on the scout; the worker retries under boundedRunOpts.
+	_ = s.stopScout(workflow.DeleteScoutInput{
+		ScoutID:       scout.ID,
+		YutoriScoutID: scout.YutoriScoutID,
+	})
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "STOPPED"})
+}
+
+// handleResearchWebhook receives a Day 0 research-task completion callback.
+// The awakeable id is embedded in the URL PATH (/api/webhooks/yutori/research/{awakeableID}),
+// not as a query param — Yutori strips query params, so path-based routing is
+// the only reliable way to correlate the callback with the waiting workflow.
+// Forwards to ScoutOps.ResolveResearch which resolves (or rejects) the awakeable.
+func (s *Server) handleResearchWebhook(w http.ResponseWriter, r *http.Request) {
+	awakeableID := r.PathValue("awakeableID")
+	if awakeableID == "" {
+		writeError(w, http.StatusBadRequest, "missing awakeable id in path")
+		return
+	}
+	raw, err := io.ReadAll(io.LimitReader(r.Body, 1<<20)) // 1 MiB cap
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "could not read webhook body")
+		return
+	}
+	if len(raw) == 0 {
+		writeError(w, http.StatusBadRequest, "empty webhook body")
+		return
+	}
+	if err := s.resolveResearch(awakeableID, raw); err != nil {
+		slog.Error("research webhook forward failed", "err", err)
+	}
+	writeJSON(w, http.StatusAccepted, map[string]string{"status": "accepted"})
+}
+
+// handleScoutWebhook receives a recurring scouting update from a deployed
+// Yutori scout. Forwards to ScoutOps.ProcessWebhook for durable signal
+// ingestion + mutation evaluation. A defensive query-param fallback is kept
+// for any in-flight research task created before the path-based routing change.
+func (s *Server) handleScoutWebhook(w http.ResponseWriter, r *http.Request) {
+	raw, err := io.ReadAll(io.LimitReader(r.Body, 1<<20)) // 1 MiB cap
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "could not read webhook body")
+		return
+	}
+	if len(raw) == 0 {
+		writeError(w, http.StatusBadRequest, "empty webhook body")
+		return
+	}
+
+	// Fallback: old research tasks may still carry ?aw=<id> from before the
+	// path-based routing change. Route them to ResolveResearch instead of
+	// ProcessWebhook so they don't trigger a spurious mutation eval.
+	if awakeableID := r.URL.Query().Get("aw"); awakeableID != "" {
+		if err := s.resolveResearch(awakeableID, raw); err != nil {
+			slog.Error("research webhook forward failed (query-param fallback)", "err", err)
+		}
+		writeJSON(w, http.StatusAccepted, map[string]string{"status": "accepted"})
+		return
+	}
+
+	if err := s.forwardWebhook(raw); err != nil {
+		slog.Error("webhook forward failed", "err", err)
+	}
+	writeJSON(w, http.StatusAccepted, map[string]string{"status": "accepted"})
 }

@@ -1,72 +1,89 @@
 // Package models defines the core domain types shared across the database,
-// API, workflow, and AI-client layers of the Validator platform.
+// API, worker, and scouts layers of the Validator platform.
 package models
 
 import "time"
 
-// Platform is a target surface that scouts search for market signals on.
-type Platform string
+// ScoutType is the polarity of a scout and the signals it harvests. It is used
+// both as the scouts.scout_type and the market_signals.polarity.
+type ScoutType string
 
 const (
-	PlatformReddit  Platform = "reddit"
-	PlatformYoutube Platform = "youtube"
-	PlatformSocial  Platform = "social"
-	PlatformNews    Platform = "news"
-	PlatformCustom  Platform = "custom"
+	ScoutTypePro ScoutType = "PRO"
+	ScoutTypeCon ScoutType = "CON"
 )
 
-// Polarity expresses whether a signal supports or undermines the idea.
-type Polarity string
+// IdeaStatus is the lifecycle state of an idea.
+type IdeaStatus string
 
 const (
-	PolarityPro Polarity = "pro"
-	PolarityCon Polarity = "con"
+	IdeaStatusInitialSweep IdeaStatus = "INITIAL_SWEEP"
+	IdeaStatusActive       IdeaStatus = "ACTIVE"
 )
 
-// CustomChannel is a user-supplied source (e.g. a competitor landing page).
-type CustomChannel struct {
-	ID    string `json:"id"`
-	URL   string `json:"url"`
-	Label string `json:"label"`
-}
+// ScoutStatus is the tracking state of an individual scout.
+type ScoutStatus string
 
-// Idea is a market hypothesis being continuously validated.
+const (
+	ScoutStatusActive          ScoutStatus = "ACTIVE"
+	ScoutStatusPendingMutation ScoutStatus = "PENDING_MUTATION"
+	ScoutStatusStopped         ScoutStatus = "STOPPED"
+)
+
+// ProposalStatus is the human-in-the-loop state of a prompt proposal.
+type ProposalStatus string
+
+const (
+	ProposalPending  ProposalStatus = "PENDING"
+	ProposalApproved ProposalStatus = "APPROVED"
+	ProposalRejected ProposalStatus = "REJECTED"
+)
+
+// Idea is a market hypothesis being continuously validated by two scouts.
 type Idea struct {
-	ID             string          `json:"id"`
-	Title          string          `json:"title"`
-	Description    string          `json:"description"`
-	FrequencyDays  int             `json:"frequency_days"`
-	Keywords       []string        `json:"keywords"`
-	Channels       []string        `json:"channels"`
-	CustomChannels []CustomChannel `json:"custom_channels"`
-	Status         string          `json:"status"`
-	StatusMessage  string          `json:"status_message"`
-	TotalPros      int             `json:"total_pros"`
-	TotalCons      int             `json:"total_cons"`
-	CreatedAt      time.Time       `json:"created_at"`
-	UpdatedAt      time.Time       `json:"updated_at"`
+	ID            string
+	Title         string
+	Description   string
+	FrequencyDays int
+	Status        IdeaStatus
+	TotalPros     int
+	TotalCons     int
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
-// ScoutRun is the snapshot metadata for a single execution cycle of the
-// tracking workflow against an idea.
-type ScoutRun struct {
-	ID        string    `json:"id"`
-	IdeaID    string    `json:"idea_id"`
-	DayNumber int       `json:"day_number"`
-	Label     string    `json:"label"`
-	RunAt     time.Time `json:"run_at"`
+// Scout is a single Yutori scouting task (PRO or CON) attached to an idea.
+type Scout struct {
+	ID            string
+	IdeaID        string
+	YutoriScoutID string
+	ScoutType     ScoutType
+	CurrentPrompt string
+	Status        ScoutStatus
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
+
+// PromptProposal is an AI-proposed search-radius expansion awaiting human review.
+type PromptProposal struct {
+	ID             string
+	ScoutID        string
+	ProposedPrompt string
+	Status         ProposalStatus
+	CreatedAt      time.Time
+	ResolvedAt     *time.Time
 }
 
 // MarketSignal is a single pro/con finding harvested by a scout.
 type MarketSignal struct {
-	ID          string    `json:"id"`
-	ScoutRunID  string    `json:"scout_run_id"`
-	IdeaID      string    `json:"idea_id"`
-	Polarity    Polarity  `json:"polarity"`
-	Platform    Platform  `json:"platform"`
-	Quote       string    `json:"quote"`
-	Reason      string    `json:"reason"`
-	SourceURL   string    `json:"source_url"`
-	SourceTitle string    `json:"source_title"`
-	CreatedAt   time.Time `json:"created_at"`
+	ID          string
+	IdeaID      string
+	ScoutID     string
+	Polarity    ScoutType
+	Platform    string
+	Quote       string
+	Reason      string
+	SourceURL   string
+	SourceTitle string
+	CreatedAt   time.Time
 }

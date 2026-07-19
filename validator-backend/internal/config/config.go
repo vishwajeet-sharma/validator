@@ -29,12 +29,32 @@ type Config struct {
 	// RestateAuthKey is an optional bearer token used against the Restate ingress.
 	RestateAuthKey string
 
-	// YutoriAPIKey authenticates against the Yutori Research API.
+	// YutoriAPIKey authenticates against the Yutori Research/Scouting APIs.
 	YutoriAPIKey string
 	// YutoriAPIBase is the root URL of the Yutori API.
 	YutoriAPIBase string
 	// YutoriTimeout caps a single HTTP call to the Yutori API.
 	YutoriTimeout time.Duration
+
+	// WebhookPublicURL is the public base URL Yutori calls back with scout
+	// updates. The worker appends /api/webhooks/yutori. Empty disables webhook
+	// delivery (scouts still run, but signals won't flow back automatically).
+	WebhookPublicURL string
+
+	// LLMAPIBase / LLMAPIKey / LLMModel configure the OpenAI-compatible chat
+	// client used for the scout prompt-mutation evaluation. This deliberately
+	// does NOT use the Yutori Research API (which is paid and reserved for Day 0
+	// research + recurring scouts). When LLM_API_KEY is empty the mutation eval
+	// is skipped gracefully (no external call, no proposal).
+	LLMAPIBase string
+	LLMAPIKey  string
+	LLMModel   string
+	LLMTimeout time.Duration
+
+	// ScoutIntervalSeconds overrides the recurring-scout output_interval so
+	// local testing gets fresh data quickly instead of waiting days. 0 = use the
+	// idea's scoutingFrequencyDays (production behaviour).
+	ScoutIntervalSeconds int
 }
 
 // Load reads configuration from the environment, applying safe defaults.
@@ -50,13 +70,19 @@ func Load() (Config, error) {
 
 	cfg := Config{
 		DatabaseURL:           databaseURL,
-		HTTPAddr:              envOrDefault("HTTP_ADDR", ":8000"),
+		HTTPAddr:              envOrDefault("HTTP_ADDR", ":8080"),
 		RestateDeploymentAddr: envOrDefault("RESTATE_DEPLOYMENT_ADDR", ":9080"),
 		RestateIngressURL:     envOrDefault("RESTATE_INGRESS_URL", "http://localhost:8080"),
 		RestateAuthKey:        os.Getenv("RESTATE_AUTH_KEY"),
 		YutoriAPIKey:          os.Getenv("YUTORI_API_KEY"),
 		YutoriAPIBase:         strings.TrimRight(envOrDefault("YUTORI_API_BASE", "https://api.yutori.com"), "/"),
 		YutoriTimeout:         time.Duration(envIntOrDefault("YUTORI_TIMEOUT_SECONDS", 60)) * time.Second,
+		WebhookPublicURL:      strings.TrimRight(os.Getenv("WEBHOOK_PUBLIC_URL"), "/"),
+		LLMAPIBase:            strings.TrimRight(envOrDefault("LLM_API_BASE", "https://api.openai.com/v1"), "/"),
+		LLMAPIKey:             os.Getenv("LLM_API_KEY"),
+		LLMModel:              envOrDefault("LLM_MODEL", "gpt-4o-mini"),
+		LLMTimeout:            time.Duration(envIntOrDefault("LLM_TIMEOUT_SECONDS", 30)) * time.Second,
+		ScoutIntervalSeconds:  envIntOrDefault("SCOUT_INTERVAL_SECONDS", 0),
 	}
 
 	return cfg, nil

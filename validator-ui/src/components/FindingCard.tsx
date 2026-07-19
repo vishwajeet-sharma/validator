@@ -15,7 +15,7 @@ const platformIcons: Record<string, React.ElementType> = {
   custom: Globe,
 };
 
-const platformColors = {
+const platformColors: Record<string, { dark: string; light: string }> = {
   reddit: {
     dark: 'text-orange-400 bg-orange-500/10',
     light: 'text-orange-600 bg-orange-100',
@@ -93,7 +93,7 @@ export function FindingCard({ finding, type }: FindingCardProps) {
             <span className={`text-xs ${
               theme === 'dark' ? 'text-zinc-500' : 'text-zinc-400'
             }`}>
-              via {platformNames[finding.platform]}
+              via {platformNames[finding.platform] || finding.platform || 'web'}
             </span>
           </div>
         </div>

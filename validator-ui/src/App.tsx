@@ -1,25 +1,22 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { ThemeProvider } from './context/ThemeContext';
-import { IdeaProvider } from './context/IdeaContext';
 import { Layout } from './components/Layout';
 import { Dashboard } from './pages/Dashboard';
-import { NewIdea } from './pages/NewIdea';
-import { IdeaDetail } from './pages/IdeaDetail';
+import { NewIdeaForm } from './pages/NewIdeaForm';
+import { IdeaDetailDashboard } from './pages/IdeaDetailDashboard';
 
 function App() {
   return (
     <ThemeProvider>
-      <IdeaProvider>
-        <BrowserRouter>
-          <Layout>
-            <Routes>
-              <Route path="/" element={<Dashboard />} />
-              <Route path="/new" element={<NewIdea />} />
-              <Route path="/idea/:id" element={<IdeaDetail />} />
-            </Routes>
-          </Layout>
-        </BrowserRouter>
-      </IdeaProvider>
+      <BrowserRouter>
+        <Layout>
+          <Routes>
+            <Route path="/" element={<Dashboard />} />
+            <Route path="/new" element={<NewIdeaForm />} />
+            <Route path="/idea/:id" element={<IdeaDetailDashboard />} />
+          </Routes>
+        </Layout>
+      </BrowserRouter>
     </ThemeProvider>
   );
 }

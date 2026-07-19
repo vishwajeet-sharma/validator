@@ -1,140 +1,163 @@
 package api
 
 import (
-	"time"
+	"unicode/utf8"
 
 	"validator-backend/internal/models"
 )
 
 // The DTO types in this file are the exact JSON contract the React UI consumes
-// (see validator-ui/src/types/index.ts). They use camelCase and embed the nested
-// cycles/findings shape the UI expects, so the database's normalized model can
-// stay clean while the API speaks the frontend's dialect.
+// (see validator-ui/src/types/index.ts). They use camelCase and mirror the
+// split PRO/CON scout + proposal model.
 
-// FindingDTO is a single pro/con quote with its source metadata.
+// ScoutDTO is one PRO/CON scout with its (optional) pending proposal.
+type ScoutDTO struct {
+	ID              string       `json:"id"`
+	ScoutType       string       `json:"scoutType"`
+	Status          string       `json:"status"`
+	CurrentPrompt   string       `json:"currentPrompt"`
+	PendingProposal *ProposalDTO `json:"pendingProposal,omitempty"`
+}
+
+// ProposalDTO is an AI-proposed search-radius expansion awaiting review.
+type ProposalDTO struct {
+	ID             string `json:"id"`
+	ProposedPrompt string `json:"proposedPrompt"`
+	Status         string `json:"status"`
+	CreatedAt      string `json:"createdAt"`
+}
+
+// FindingDTO is a single pro/con signal.
 type FindingDTO struct {
 	ID          string `json:"id"`
+	Polarity    string `json:"polarity"`
 	Platform    string `json:"platform"`
 	Quote       string `json:"quote"`
 	Reason      string `json:"reason"`
 	SourceURL   string `json:"sourceUrl"`
 	SourceTitle string `json:"sourceTitle"`
+	CreatedAt   string `json:"createdAt"`
 }
 
-// ScoutCycleDTO is one scout execution: its metadata plus the pro/con findings.
-type ScoutCycleDTO struct {
-	ID    string       `json:"id"`
-	Day   int          `json:"day"`
-	Label string       `json:"label"`
-	Date  string       `json:"date"`
-	Pros  []FindingDTO `json:"pros"`
-	Cons  []FindingDTO `json:"cons"`
+// IdeaSummaryDTO is the lightweight shape used by the dashboard list.
+type IdeaSummaryDTO struct {
+	ID                    string `json:"id"`
+	Title                 string `json:"title"`
+	Description           string `json:"description"`
+	ScoutingFrequencyDays int    `json:"scoutingFrequencyDays"`
+	Status                string `json:"status"`
+	TotalPros             int    `json:"totalPros"`
+	TotalCons             int    `json:"totalCons"`
+	ProScoutStatus        string `json:"proScoutStatus"`
+	ConScoutStatus        string `json:"conScoutStatus"`
+	CreatedAt             string `json:"createdAt"`
+	LastUpdated           string `json:"lastUpdated"`
 }
 
-// CustomChannelDTO is a user-defined source URL/label.
-type CustomChannelDTO struct {
-	ID    string `json:"id"`
-	URL   string `json:"url"`
-	Label string `json:"label"`
+// IdeaDetailDTO is the full shape used by the idea detail board, including the
+// two scouts and the most recent pro/con findings.
+type IdeaDetailDTO struct {
+	IdeaSummaryDTO
+	Scouts     []ScoutDTO   `json:"scouts"`
+	RecentPros []FindingDTO `json:"recentPros"`
+	RecentCons []FindingDTO `json:"recentCons"`
 }
 
-// IdeaDTO is the full idea payload the UI renders, including embedded cycles.
-type IdeaDTO struct {
-	ID                    string             `json:"id"`
-	Title                 string             `json:"title"`
-	Description           string             `json:"description"`
-	Keywords              []string           `json:"keywords"`
-	ScoutingFrequencyDays int                `json:"scoutingFrequencyDays"`
-	Channels              []string           `json:"channels"`
-	CustomChannels        []CustomChannelDTO `json:"customChannels"`
-	CreatedAt             string             `json:"createdAt"`
-	LastUpdated           string             `json:"lastUpdated"`
-	TotalPros             int                `json:"totalPros"`
-	TotalCons             int                `json:"totalCons"`
-	NewSignalsToday       int                `json:"newSignalsToday"`
-	Status                string             `json:"status"`
-	StatusMessage         string             `json:"statusMessage"`
-	Cycles                []ScoutCycleDTO    `json:"cycles"`
+// BuildScoutDTO assembles a scout DTO with its pending proposal (if any).
+func BuildScoutDTO(scout models.Scout, pending *models.PromptProposal) ScoutDTO {
+	out := ScoutDTO{
+		ID:            scout.ID,
+		ScoutType:     string(scout.ScoutType),
+		Status:        string(scout.Status),
+		CurrentPrompt: scout.CurrentPrompt,
+	}
+	if pending != nil {
+		out.PendingProposal = &ProposalDTO{
+			ID:             pending.ID,
+			ProposedPrompt: pending.ProposedPrompt,
+			Status:         string(pending.Status),
+			CreatedAt:      rfc3339(pending.CreatedAt),
+		}
+	}
+	return out
 }
 
-// BuildIdeaDTO assembles the UI-facing idea shape from the normalized DB models,
-// grouping signals under their scout run and bucketing them into pros/cons. It
-// also computes newSignalsToday (signals created since the start of today UTC).
-func BuildIdeaDTO(idea *models.Idea, runs []models.ScoutRun, signals []models.MarketSignal) IdeaDTO {
-	// Index signals by their scout run for O(n) assembly.
-	byRun := make(map[string][]models.MarketSignal, len(runs))
-	startOfToday := todayStartUTC()
-	newToday := 0
+// BuildFindingDTO converts a market signal into a finding DTO.
+func BuildFindingDTO(sig models.MarketSignal) FindingDTO {
+	return FindingDTO{
+		ID:          sig.ID,
+		Polarity:    string(sig.Polarity),
+		Platform:    sig.Platform,
+		Quote:       sig.Quote,
+		Reason:      sig.Reason,
+		SourceURL:   sig.SourceURL,
+		SourceTitle: sig.SourceTitle,
+		CreatedAt:   rfc3339(sig.CreatedAt),
+	}
+}
+
+// scoutStatusFor returns the status of a given scout type from a slice, or
+// "UNDEPLOYED" if that scout hasn't been created yet (Day 0 still running).
+func scoutStatusFor(scouts []models.Scout, t models.ScoutType) string {
+	for _, sc := range scouts {
+		if sc.ScoutType == t {
+			return string(sc.Status)
+		}
+	}
+	return "UNDEPLOYED"
+}
+
+// scoutsForDetail assembles the scout DTOs (with pending proposals) for an idea.
+func scoutsForDetail(scouts []models.Scout, proposals map[string]*models.PromptProposal) []ScoutDTO {
+	out := make([]ScoutDTO, 0, len(scouts))
+	for _, sc := range scouts {
+		out = append(out, BuildScoutDTO(sc, proposals[sc.ID]))
+	}
+	if len(out) == 0 {
+		return []ScoutDTO{}
+	}
+	return out
+}
+
+// splitSignals partitions signals into recent pros/cons (capped for the UI).
+func splitSignals(signals []models.MarketSignal, limit int) ([]FindingDTO, []FindingDTO) {
+	pros := make([]FindingDTO, 0, limit)
+	cons := make([]FindingDTO, 0, limit)
 	for _, sig := range signals {
-		byRun[sig.ScoutRunID] = append(byRun[sig.ScoutRunID], sig)
-		if !sig.CreatedAt.Before(startOfToday) {
-			newToday++
-		}
-	}
-
-	cycles := make([]ScoutCycleDTO, 0, len(runs))
-	for _, run := range runs {
-		cycle := ScoutCycleDTO{
-			ID:    run.ID,
-			Day:   run.DayNumber,
-			Label: run.Label,
-			Date:  run.RunAt.UTC().Format(time.RFC3339),
-			Pros:  []FindingDTO{},
-			Cons:  []FindingDTO{},
-		}
-		for _, sig := range byRun[run.ID] {
-			finding := FindingDTO{
-				ID:          sig.ID,
-				Platform:    string(sig.Platform),
-				Quote:       sig.Quote,
-				Reason:      sig.Reason,
-				SourceURL:   sig.SourceURL,
-				SourceTitle: sig.SourceTitle,
+		f := BuildFindingDTO(sig)
+		if sig.Polarity == models.ScoutTypePro {
+			if len(pros) < limit {
+				pros = append(pros, f)
 			}
-			if sig.Polarity == models.PolarityCon {
-				cycle.Cons = append(cycle.Cons, finding)
-			} else {
-				cycle.Pros = append(cycle.Pros, finding)
+		} else {
+			if len(cons) < limit {
+				cons = append(cons, f)
 			}
 		}
-		cycles = append(cycles, cycle)
 	}
-
-	custom := make([]CustomChannelDTO, 0, len(idea.CustomChannels))
-	for _, c := range idea.CustomChannels {
-		custom = append(custom, CustomChannelDTO{ID: c.ID, URL: c.URL, Label: c.Label})
-	}
-
-	keywords := idea.Keywords
-	channels := idea.Channels
-	if keywords == nil {
-		keywords = []string{}
-	}
-	if channels == nil {
-		channels = []string{}
-	}
-
-	return IdeaDTO{
-		ID:                    idea.ID,
-		Title:                 idea.Title,
-		Description:           idea.Description,
-		Keywords:              keywords,
-		ScoutingFrequencyDays: idea.FrequencyDays,
-		Channels:              channels,
-		CustomChannels:        custom,
-		CreatedAt:             idea.CreatedAt.UTC().Format(time.RFC3339),
-		LastUpdated:           idea.UpdatedAt.UTC().Format(time.RFC3339),
-		TotalPros:             idea.TotalPros,
-		TotalCons:             idea.TotalCons,
-		NewSignalsToday:       newToday,
-		Status:                idea.Status,
-		StatusMessage:         idea.StatusMessage,
-		Cycles:                cycles,
-	}
+	return pros, cons
 }
 
-// todayStartUTC returns the midnight boundary of today in UTC.
-func todayStartUTC() time.Time {
-	now := time.Now().UTC()
-	return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+// deriveTitle produces a concise title from a raw description when the caller
+// doesn't supply one explicitly.
+func deriveTitle(description string) string {
+	d := truncateRunes(description, 100)
+	for i, r := range d {
+		if r == '\n' {
+			d = d[:i]
+			break
+		}
+	}
+	if d == "" {
+		return "Untitled Idea"
+	}
+	return d
+}
+
+func truncateRunes(s string, n int) string {
+	if utf8.RuneCountInString(s) <= n {
+		return s
+	}
+	rs := []rune(s)
+	return string(rs[:n]) + "…"
 }

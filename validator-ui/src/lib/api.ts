@@ -1,8 +1,14 @@
-import type { Idea, NewIdeaForm } from '../types';
+import type {
+  CreateIdeaResponse,
+  IdeaDetail,
+  IdeaSummary,
+  NewIdeaForm,
+  ProposalResponseRequest,
+} from '../types';
 
 // Base URL for the Validator backend. In dev we leave this empty so requests are
 // relative and the Vite dev-server proxy (see vite.config.ts) forwards them to
-// :8000. For production builds, set VITE_API_BASE to the backend origin.
+// the API surface. For production builds, set VITE_API_BASE to the backend origin.
 const BASE = (import.meta.env.VITE_API_BASE ?? '').replace(/\/$/, '');
 
 export class ApiError extends Error {
@@ -55,16 +61,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return parsed as T;
 }
 
-export interface CreateIdeaResponse {
-  idea: Idea;
-  workflow_id: string;
-  invocation_id?: string;
-}
-
 export const api = {
-  listIdeas: () => request<Idea[]>('/api/ideas'),
+  listIdeas: () => request<IdeaSummary[]>('/api/ideas'),
 
-  getIdea: (id: string) => request<Idea>(`/api/ideas/${encodeURIComponent(id)}`),
+  getIdea: (id: string) => request<IdeaDetail>(`/api/ideas/${encodeURIComponent(id)}`),
 
   createIdea: (form: NewIdeaForm) =>
     request<CreateIdeaResponse>('/api/ideas', {
@@ -72,6 +72,14 @@ export const api = {
       body: JSON.stringify(form),
     }),
 
-  getPayload: (id: string) =>
-    request<{ payload: string }>(`/api/ideas/${encodeURIComponent(id)}/payload`),
+  respondProposal: (proposalId: string, body: ProposalResponseRequest) =>
+    request<{ status: string }>(`/api/proposals/${encodeURIComponent(proposalId)}/respond`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  stopScout: (scoutId: string) =>
+    request<{ status: string }>(`/api/scouts/${encodeURIComponent(scoutId)}`, {
+      method: 'DELETE',
+    }),
 };
