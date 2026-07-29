@@ -1,5 +1,6 @@
 # --- Compiled binaries (output of `go build`) ---
 /validator-backend
+/bin/
 *.exe
 *.exe~
 *.dll

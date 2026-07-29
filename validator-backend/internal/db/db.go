@@ -213,6 +213,50 @@ func (s *Store) ActivateIdea(ctx context.Context, ideaID string) error {
 	return nil
 }
 
+// DeactivateIdea marks an idea INACTIVE and, in the same transaction, stops all
+// of its scouts and rejects their pending proposals. Used when a user
+// deactivates an idea: the scouts stop running (their Yutori counterparts are
+// deleted separately by the caller), so any pending proposals become
+// unfulfillable and must not linger as unreachable review items. Existing
+// findings are kept. Returns ErrNotFound if the idea doesn't exist.
+func (s *Store) DeactivateIdea(ctx context.Context, ideaID string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }() //nolint:errcheck
+
+	res, err := tx.ExecContext(ctx,
+		`UPDATE ideas SET status = $2, updated_at = NOW() WHERE id = $1`,
+		ideaID, models.IdeaStatusInactive)
+	if err != nil {
+		return fmt.Errorf("deactivate idea: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("%w: idea %s", ErrNotFound, ideaID)
+	}
+
+	// Stop every scout owned by this idea.
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE scouts SET status = $2, updated_at = NOW() WHERE idea_id = $1`,
+		ideaID, models.ScoutStatusStopped); err != nil {
+		return fmt.Errorf("stop scouts on deactivate: %w", err)
+	}
+
+	// Reject any still-pending proposals for those scouts (now unfulfillable).
+	if _, err := tx.ExecContext(ctx, `
+UPDATE prompt_proposals p SET status = $2, resolved_at = NOW()
+WHERE p.status = $3 AND EXISTS (SELECT 1 FROM scouts s WHERE s.id = p.scout_id AND s.idea_id = $1)`,
+		ideaID, models.ProposalRejected, models.ProposalPending); err != nil {
+		return fmt.Errorf("reject proposals on deactivate: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit deactivate: %w", err)
+	}
+	return nil
+}
+
 // --- Scouts ---------------------------------------------------------------
 
 // CreateScout persists a scout row, idempotent on the Yutori scout id. If a row
@@ -425,6 +469,22 @@ RETURNING scout_id`
 
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit resolve: %w", err)
+	}
+	return nil
+}
+
+// RejectPendingProposals resolves every still-PENDING proposal for a scout as
+// REJECTED, without changing the scout's status (unlike ResolveProposal, which
+// restores the scout to ACTIVE). Used when a scout is stopped: its pending
+// proposals can no longer be applied (the underlying Yutori scout is gone), so
+// they must not linger as unreachable review items in the UI.
+func (s *Store) RejectPendingProposals(ctx context.Context, scoutID string) error {
+	const q = `
+UPDATE prompt_proposals SET status = $2, resolved_at = NOW()
+WHERE scout_id = $1 AND status = $3`
+	if _, err := s.db.ExecContext(ctx, q,
+		scoutID, models.ProposalRejected, models.ProposalPending); err != nil {
+		return fmt.Errorf("reject pending proposals: %w", err)
 	}
 	return nil
 }

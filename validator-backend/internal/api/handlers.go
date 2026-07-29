@@ -285,6 +285,14 @@ func (s *Server) handleDeleteScout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A stopped scout's pending proposals can never be applied (the underlying
+	// Yutori scout is gone). Resolve them as rejected so they don't linger as
+	// unreachable review items in the UI. Best-effort: a failure here doesn't
+	// un-stop the scout.
+	if err := s.DB.RejectPendingProposals(r.Context(), id); err != nil {
+		slog.Warn("reject pending proposals on stop failed", "scout_id", id, "err", err)
+	}
+
 	// Forward the Yutori delete to the worker (fire-and-forget). The DB is
 	// already stopped, so a delayed/failed Yutori delete does not leave the
 	// user able to act on the scout; the worker retries under boundedRunOpts.
@@ -294,6 +302,61 @@ func (s *Server) handleDeleteScout(w http.ResponseWriter, r *http.Request) {
 	})
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "STOPPED"})
+}
+
+// handleDeactivateIdea deactivates an idea: marks it INACTIVE, stops both its
+// scouts, and rejects their pending proposals (all in one DB transaction), then
+// fire-and-forgets worker calls to delete the scouts on Yutori (which is what
+// actually halts recurring credit usage). Existing findings are kept. Idempotent
+// for an already-INACTIVE idea.
+func (s *Server) handleDeactivateIdea(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "missing idea id")
+		return
+	}
+	idea, err := s.DB.GetIdea(r.Context(), id)
+	if err != nil {
+		if notFound(err) {
+			writeError(w, http.StatusNotFound, "idea not found")
+			return
+		}
+		slog.Error("get idea failed", "err", err)
+		writeError(w, http.StatusInternalServerError, "could not load idea")
+		return
+	}
+	if idea.Status == models.IdeaStatusInactive {
+		writeJSON(w, http.StatusOK, map[string]string{"status": "INACTIVE"})
+		return
+	}
+
+	// Load scouts BEFORE deactivating so we know which Yutori scouts to delete.
+	scouts, err := s.DB.GetScoutsByIdea(r.Context(), id)
+	if err != nil {
+		slog.Error("get scouts for deactivate failed", "err", err)
+		writeError(w, http.StatusInternalServerError, "could not load scouts")
+		return
+	}
+
+	if err := s.DB.DeactivateIdea(r.Context(), id); err != nil {
+		slog.Error("deactivate idea failed", "err", err)
+		writeError(w, http.StatusInternalServerError, "could not deactivate idea")
+		return
+	}
+
+	// Fire-and-forget a Yutori delete per still-live scout. STOPPED scouts were
+	// already deleted on Yutori when they were stopped.
+	for _, sc := range scouts {
+		if sc.Status == models.ScoutStatusStopped {
+			continue
+		}
+		_ = s.stopScout(workflow.DeleteScoutInput{
+			ScoutID:       sc.ID,
+			YutoriScoutID: sc.YutoriScoutID,
+		})
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "INACTIVE"})
 }
 
 // handleResearchWebhook receives a Day 0 research-task completion callback.

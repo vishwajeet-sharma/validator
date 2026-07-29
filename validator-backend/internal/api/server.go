@@ -37,6 +37,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/ideas/{id}", s.handleGetIdea)
 	mux.HandleFunc("POST /api/proposals/{id}/respond", s.handleRespondProposal)
 	mux.HandleFunc("DELETE /api/scouts/{id}", s.handleDeleteScout)
+	mux.HandleFunc("DELETE /api/ideas/{id}", s.handleDeactivateIdea)
 	mux.HandleFunc("POST /api/webhooks/yutori/research/{awakeableID}", s.handleResearchWebhook)
 	mux.HandleFunc("POST /api/webhooks/yutori", s.handleScoutWebhook)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {

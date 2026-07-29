@@ -82,4 +82,9 @@ export const api = {
     request<{ status: string }>(`/api/scouts/${encodeURIComponent(scoutId)}`, {
       method: 'DELETE',
     }),
+
+  deactivateIdea: (ideaId: string) =>
+    request<{ status: string }>(`/api/ideas/${encodeURIComponent(ideaId)}`, {
+      method: 'DELETE',
+    }),
 };

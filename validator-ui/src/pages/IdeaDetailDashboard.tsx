@@ -13,6 +13,7 @@ export function IdeaDetailDashboard() {
   const [idea, setIdea] = useState<IdeaDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [drawerScout, setDrawerScout] = useState<Scout | null>(null);
+  const [deactivating, setDeactivating] = useState(false);
 
   const reload = useCallback(async () => {
     if (!id) {
@@ -71,6 +72,23 @@ export function IdeaDetailDashboard() {
   const proScout = idea.scouts.find((s) => s.scoutType === 'PRO');
   const conScout = idea.scouts.find((s) => s.scoutType === 'CON');
   const isInitialSweep = idea.status === 'INITIAL_SWEEP';
+  const isInactive = idea.status === 'INACTIVE';
+
+  const handleDeactivate = async () => {
+    const confirmed = window.confirm(
+      `Deactivate "${idea.title}"? Both scouts will be stopped on Yutori (halting credit usage), pending proposals rejected, and the idea marked inactive. Existing findings are kept. This cannot be undone.`
+    );
+    if (!confirmed) return;
+    setDeactivating(true);
+    try {
+      await api.deactivateIdea(idea.id);
+      await reload();
+    } catch (err) {
+      window.alert(`Failed to deactivate idea: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setDeactivating(false);
+    }
+  };
 
   const formatDate = (s: string) =>
     new Date(s).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -94,10 +112,40 @@ export function IdeaDetailDashboard() {
               <p className={`text-base max-w-2xl ${theme === 'dark' ? 'text-zinc-400' : 'text-zinc-600'}`}>{idea.description}</p>
             </div>
           </div>
-          <div className={`flex items-center gap-2 px-4 py-2 rounded-xl border ${isInitialSweep ? (theme === 'dark' ? 'bg-sky-500/10 border-sky-500/30' : 'bg-sky-50 border-sky-200') : (theme === 'dark' ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-emerald-50 border-emerald-200')}`}>
-            <span className={`text-sm font-medium ${isInitialSweep ? (theme === 'dark' ? 'text-sky-400' : 'text-sky-700') : (theme === 'dark' ? 'text-emerald-400' : 'text-emerald-700')}`}>
-              {isInitialSweep ? 'Deploying Scouts…' : 'Active'}
-            </span>
+          <div className="flex items-center gap-2">
+            <div className={`flex items-center gap-2 px-4 py-2 rounded-xl border ${
+              isInactive
+                ? (theme === 'dark' ? 'bg-zinc-800 border-zinc-700' : 'bg-zinc-100 border-zinc-300')
+                : isInitialSweep
+                  ? (theme === 'dark' ? 'bg-sky-500/10 border-sky-500/30' : 'bg-sky-50 border-sky-200')
+                  : (theme === 'dark' ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-emerald-50 border-emerald-200')
+            }`}>
+              <span className={`text-sm font-medium ${
+                isInactive
+                  ? (theme === 'dark' ? 'text-zinc-400' : 'text-zinc-500')
+                  : isInitialSweep
+                    ? (theme === 'dark' ? 'text-sky-400' : 'text-sky-700')
+                    : (theme === 'dark' ? 'text-emerald-400' : 'text-emerald-700')
+              }`}>
+                {isInactive ? 'Inactive' : isInitialSweep ? 'Deploying Scouts…' : 'Active'}
+              </span>
+            </div>
+            {/* Deactivate control: only while the idea is live. */}
+            {!isInactive && (
+              <button
+                type="button"
+                onClick={handleDeactivate}
+                disabled={deactivating}
+                className={`text-xs font-medium px-3 py-2 rounded-xl border transition-colors disabled:opacity-50 ${
+                  theme === 'dark'
+                    ? 'text-zinc-400 border-zinc-700 hover:text-rose-300 hover:border-rose-500/40 hover:bg-rose-500/10'
+                    : 'text-zinc-500 border-zinc-300 hover:text-rose-600 hover:border-rose-300 hover:bg-rose-50'
+                }`}
+                title="Deactivate this idea: stop both scouts on Yutori and mark it inactive"
+              >
+                {deactivating ? 'Deactivating…' : 'Deactivate'}
+              </button>
+            )}
           </div>
         </div>
 

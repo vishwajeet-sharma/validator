@@ -3,7 +3,7 @@
 
 export type ScoutType = 'PRO' | 'CON';
 export type ScoutStatus = 'ACTIVE' | 'PENDING_MUTATION' | 'UNDEPLOYED' | 'STOPPED';
-export type IdeaStatus = 'INITIAL_SWEEP' | 'ACTIVE';
+export type IdeaStatus = 'INITIAL_SWEEP' | 'ACTIVE' | 'INACTIVE';
 export type ProposalStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
 
 export interface Proposal {

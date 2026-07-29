@@ -19,6 +19,7 @@ type IdeaStatus string
 const (
 	IdeaStatusInitialSweep IdeaStatus = "INITIAL_SWEEP"
 	IdeaStatusActive       IdeaStatus = "ACTIVE"
+	IdeaStatusInactive     IdeaStatus = "INACTIVE"
 )
 
 // ScoutStatus is the tracking state of an individual scout.
