@@ -1,0 +1,15 @@
+import{j as s}from"./iframe-B9CA_Sym.js";import{F as a}from"./FindingCard-CVC7h0Oe.js";import"./preload-helper-C1FmrZbK.js";import"./Icons-BJgoYshM.js";import"./createLucideIcon-CSOz51HC.js";const w={id:"1",polarity:"PRO",platform:"reddit",quote:"After three months of using this for our team's project management, the automation features alone have saved us 10+ hours per week. The learning curve is minimal.",reason:"Users consistently praise the time-saving automation, indicating strong product-market fit for productivity-focused teams.",sourceUrl:"https://reddit.com/r/productivity/comments/example",sourceTitle:"r/productivity discussion",createdAt:"2024-01-15T10:30:00Z"},T={id:"2",polarity:"CON",platform:"youtube",quote:"The pricing model is way too aggressive for small teams. At $50/month per user, it's nearly impossible to justify when there are free alternatives.",reason:"Price sensitivity is a recurring concern, particularly among smaller teams who may churn to free competitors.",sourceUrl:"https://youtube.com/watch?v=example",sourceTitle:"Tech Review Channel",createdAt:"2024-01-14T15:00:00Z"},x={id:"3",polarity:"PRO",platform:"news",quote:"This tool was featured in our annual roundup as one of the most innovative products of the year, praised for its intuitive design.",reason:"Media coverage validates market awareness and credibility, driving organic discovery.",sourceUrl:"https://example.com/article",sourceTitle:"TechCrunch",createdAt:"2024-01-13T08:00:00Z"},C={id:"4",polarity:"CON",platform:"social",quote:"Honestly the customer support is non-existent. Been waiting 2 weeks for a response and still nothing.",reason:"Poor customer experience risks negative word-of-mouth and high churn rates.",sourceUrl:"https://instagram.com/p/example",sourceTitle:"@userreview",createdAt:"2024-01-12T18:45:00Z"},j={title:"Components/FindingCard",component:a,tags:["autodocs"],args:{finding:w,type:"pro"},render:v=>s.jsx("div",{className:"max-w-md",children:s.jsx(a,{...v})})},e={},r={args:{finding:x}},o={args:{finding:T,type:"con"}},t={args:{finding:C,type:"con"}};var n,i,c;e.parameters={...e.parameters,docs:{...(n=e.parameters)==null?void 0:n.docs,source:{originalSource:"{}",...(c=(i=e.parameters)==null?void 0:i.docs)==null?void 0:c.source}}};var d,m,u;r.parameters={...r.parameters,docs:{...(d=r.parameters)==null?void 0:d.docs,source:{originalSource:`{
+  args: {
+    finding: proNews
+  }
+}`,...(u=(m=r.parameters)==null?void 0:m.docs)==null?void 0:u.source}}};var p,l,g;o.parameters={...o.parameters,docs:{...(p=o.parameters)==null?void 0:p.docs,source:{originalSource:`{
+  args: {
+    finding: conYouTube,
+    type: 'con' as const
+  }
+}`,...(g=(l=o.parameters)==null?void 0:l.docs)==null?void 0:g.source}}};var h,f,y;t.parameters={...t.parameters,docs:{...(h=t.parameters)==null?void 0:h.docs,source:{originalSource:`{
+  args: {
+    finding: conSocial,
+    type: 'con' as const
+  }
+}`,...(y=(f=t.parameters)==null?void 0:f.docs)==null?void 0:y.source}}};const A=["ProReddit","ProNews","ConYouTube","ConSocial"];export{t as ConSocial,o as ConYouTube,r as ProNews,e as ProReddit,A as __namedExportsOrder,j as default};

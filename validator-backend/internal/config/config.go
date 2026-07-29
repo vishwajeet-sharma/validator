@@ -29,6 +29,12 @@ type Config struct {
 	// RestateAuthKey is an optional bearer token used against the Restate ingress.
 	RestateAuthKey string
 
+	// RestateIdentityKey is the Restate Cloud request-identity public key
+	// (publickeyv1_...). When set, the worker verifies that incoming requests
+	// are signed by the matching Restate Cloud environment. Empty = no check
+	// (local dev with a self-hosted Restate runtime).
+	RestateIdentityKey string
+
 	// YutoriAPIKey authenticates against the Yutori Research/Scouting APIs.
 	YutoriAPIKey string
 	// YutoriAPIBase is the root URL of the Yutori API.
@@ -74,6 +80,7 @@ func Load() (Config, error) {
 		RestateDeploymentAddr: envOrDefault("RESTATE_DEPLOYMENT_ADDR", ":9080"),
 		RestateIngressURL:     envOrDefault("RESTATE_INGRESS_URL", "http://localhost:8080"),
 		RestateAuthKey:        os.Getenv("RESTATE_AUTH_KEY"),
+		RestateIdentityKey:    os.Getenv("RESTATE_IDENTITY_KEY"),
 		YutoriAPIKey:          os.Getenv("YUTORI_API_KEY"),
 		YutoriAPIBase:         strings.TrimRight(envOrDefault("YUTORI_API_BASE", "https://api.yutori.com"), "/"),
 		YutoriTimeout:         time.Duration(envIntOrDefault("YUTORI_TIMEOUT_SECONDS", 60)) * time.Second,

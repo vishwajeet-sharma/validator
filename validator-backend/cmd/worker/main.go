@@ -38,7 +38,8 @@ func main() {
 	slog.Info("configuration loaded",
 		"restate_deployment_addr", cfg.RestateDeploymentAddr,
 		"yutori_base", cfg.YutoriAPIBase,
-		"webhook_public_url", cfg.WebhookPublicURL)
+		"webhook_public_url", cfg.WebhookPublicURL,
+		"identity_key_set", cfg.RestateIdentityKey != "")
 
 	store, err := db.New(ctx, cfg.DatabaseURL)
 	if err != nil {
@@ -73,6 +74,11 @@ func main() {
 			DB:     store,
 			Scouts: scoutsClient,
 		}))
+
+	if cfg.RestateIdentityKey != "" {
+		slog.Info("enabling restate request identity verification")
+		restateSrv = restateSrv.WithIdentityV1(cfg.RestateIdentityKey)
+	}
 
 	slog.Info("restate deployment listening", "addr", cfg.RestateDeploymentAddr)
 	if err := restateSrv.Start(ctx, cfg.RestateDeploymentAddr); err != nil &&

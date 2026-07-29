@@ -1,11 +1,11 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
-// https://vitejs.dev/config/
+// https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
   optimizeDeps: {
-    exclude: ['lucide-react'],
+    exclude: ['lucide-react']
   },
   server: {
     // Proxy API requests to the Go backend during development so the UI can call
@@ -14,8 +14,8 @@ export default defineConfig({
     proxy: {
       '/api': {
         target: process.env.VITE_API_TARGET ?? 'http://localhost:8000',
-        changeOrigin: true,
-      },
-    },
-  },
+        changeOrigin: true
+      }
+    }
+  }
 });

@@ -1,0 +1,99 @@
+name: Deploy Backend
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-backend
+  cancel-in-progress: false
+
+env:
+  REGION: us-central1
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev
+
+      - name: Build and push image
+        run: |
+          IMAGE="${{ env.REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/validator/backend"
+          docker build \
+            -t "$IMAGE:${{ github.sha }}" \
+            -t "$IMAGE:latest" \
+            ./validator-backend
+          docker push --all-tags "$IMAGE"
+
+      - name: Deploy API to Cloud Run
+        run: |
+          IMAGE="${{ env.REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/validator/backend"
+          gcloud run deploy validator-api \
+            --image "$IMAGE:${{ github.sha }}" \
+            --region ${{ env.REGION }} \
+            --min-instances 0 \
+            --max-instances 1 \
+            --timeout 300 \
+            --allow-unauthenticated \
+            --set-env-vars "HTTP_ADDR=:8080" \
+            --set-env-vars "DATABASE_URL=${{ secrets.DATABASE_URL }}" \
+            --set-env-vars "RESTATE_INGRESS_URL=${{ secrets.RESTATE_INGRESS_URL }}" \
+            --set-env-vars "RESTATE_AUTH_KEY=${{ secrets.RESTATE_AUTH_KEY }}" \
+            --set-env-vars "WEBHOOK_PUBLIC_URL=${{ secrets.WEBHOOK_PUBLIC_URL }}"
+
+      - name: Deploy Worker to Cloud Run
+        run: |
+          IMAGE="${{ env.REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/validator/backend"
+          gcloud run deploy validator-worker \
+            --image "$IMAGE:${{ github.sha }}" \
+            --region ${{ env.REGION }} \
+            --min-instances 0 \
+            --max-instances 1 \
+            --timeout 300 \
+            --allow-unauthenticated \
+            --args "worker" \
+            --set-env-vars "RESTATE_DEPLOYMENT_ADDR=:8080" \
+            --set-env-vars "DATABASE_URL=${{ secrets.DATABASE_URL }}" \
+            --set-env-vars "RESTATE_IDENTITY_KEY=${{ secrets.RESTATE_IDENTITY_KEY }}" \
+            --set-env-vars "YUTORI_API_KEY=${{ secrets.YUTORI_API_KEY }}" \
+            --set-env-vars "LLM_API_KEY=${{ secrets.LLM_API_KEY }}" \
+            --set-env-vars "LLM_MODEL=gpt-4o-mini" \
+            --set-env-vars "WEBHOOK_PUBLIC_URL=${{ secrets.WEBHOOK_PUBLIC_URL }}"
+
+      - name: Output service URLs
+        run: |
+          API_URL=$(gcloud run services describe validator-api \
+            --region ${{ env.REGION }} --format 'value(status.url)')
+          WORKER_URL=$(gcloud run services describe validator-worker \
+            --region ${{ env.REGION }} --format 'value(status.url)')
+          {
+            echo "### Deployed ${{ github.sha }}"
+            echo "| Service | URL |"
+            echo "|---------|-----|"
+            echo "| API | $API_URL |"
+            echo "| Worker | $WORKER_URL |"
+            echo ""
+            echo "**Manual follow-up steps:**"
+            echo "- Set \`VITE_API_BASE=$API_URL\` in Vercel project settings"
+            echo "- Register worker with Restate Cloud:"
+            echo '  ```bash'
+            echo "  restate deployments register $WORKER_URL"
+            echo '  ```'
+          } >> "$GITHUB_STEP_SUMMARY"
