@@ -81,7 +81,9 @@ func main() {
 	}
 
 	slog.Info("restate deployment listening", "addr", cfg.RestateDeploymentAddr)
-	if err := restateSrv.Start(ctx, cfg.RestateDeploymentAddr); err != nil &&
+	err = restateSrv.Start(ctx, cfg.RestateDeploymentAddr)
+	slog.Info("restate server Start() returned", "err", err)
+	if err != nil &&
 		!errors.Is(err, context.Canceled) {
 		slog.Error("restate server exited unexpectedly", "err", err)
 		os.Exit(1)
