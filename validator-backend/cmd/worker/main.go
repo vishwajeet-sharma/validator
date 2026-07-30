@@ -8,11 +8,8 @@ package main
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 	"os"
-	"os/signal"
-	"syscall"
 
 	restate "github.com/restatedev/sdk-go"
 	"github.com/restatedev/sdk-go/server"
@@ -27,8 +24,7 @@ import (
 func main() {
 	slog.SetLogLoggerLevel(slog.LevelInfo)
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
+	ctx := context.Background()
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -81,13 +77,8 @@ func main() {
 	}
 
 	slog.Info("restate deployment listening", "addr", cfg.RestateDeploymentAddr)
-	err = restateSrv.Start(ctx, cfg.RestateDeploymentAddr)
-	slog.Info("restate server Start() returned", "err", err)
-	if err != nil &&
-		!errors.Is(err, context.Canceled) {
+	if err := restateSrv.Start(ctx, cfg.RestateDeploymentAddr); err != nil {
 		slog.Error("restate server exited unexpectedly", "err", err)
 		os.Exit(1)
 	}
-
-	slog.Info("worker surface stopped")
 }
