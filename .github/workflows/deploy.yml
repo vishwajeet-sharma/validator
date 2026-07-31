@@ -75,6 +75,7 @@ jobs:
             --set-env-vars "RESTATE_IDENTITY_KEY=${{ secrets.RESTATE_IDENTITY_KEY }}" \
             --set-env-vars "YUTORI_API_KEY=${{ secrets.YUTORI_API_KEY }}" \
             --set-env-vars "LLM_API_KEY=${{ secrets.LLM_API_KEY }}" \
+            --set-env-vars "LLM_API_BASE=https://api.openai.com/v1" \
             --set-env-vars "LLM_MODEL=gpt-4o-mini" \
             --set-env-vars "WEBHOOK_PUBLIC_URL=${{ secrets.WEBHOOK_PUBLIC_URL }}"
 
