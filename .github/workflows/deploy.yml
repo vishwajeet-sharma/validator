@@ -69,6 +69,7 @@ jobs:
             --timeout 300 \
             --allow-unauthenticated \
             --args "worker" \
+            --use-http2 \
             --set-env-vars "RESTATE_DEPLOYMENT_ADDR=:8080" \
             --set-env-vars "DATABASE_URL=${{ secrets.DATABASE_URL }}" \
             --set-env-vars "RESTATE_IDENTITY_KEY=${{ secrets.RESTATE_IDENTITY_KEY }}" \
