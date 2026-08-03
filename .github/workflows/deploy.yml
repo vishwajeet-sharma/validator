@@ -56,7 +56,11 @@ jobs:
             --set-env-vars "DATABASE_URL=${{ secrets.DATABASE_URL }}" \
             --set-env-vars "RESTATE_INGRESS_URL=${{ secrets.RESTATE_INGRESS_URL }}" \
             --set-env-vars "RESTATE_AUTH_KEY=${{ secrets.RESTATE_AUTH_KEY }}" \
-            --set-env-vars "WEBHOOK_PUBLIC_URL=${{ secrets.WEBHOOK_PUBLIC_URL }}"
+            --set-env-vars "WEBHOOK_PUBLIC_URL=${{ secrets.WEBHOOK_PUBLIC_URL }}" \
+            --set-env-vars "LLM_API_KEY=${{ secrets.LLM_API_KEY }}" \
+            --set-env-vars "LLM_API_BASE=https://api.openai.com/v1" \
+            --set-env-vars "LLM_CHAT_MODEL=gpt-4o" \
+            --set-env-vars "LLM_TIMEOUT_SECONDS=60"
 
       - name: Deploy Worker to Cloud Run
         run: |
