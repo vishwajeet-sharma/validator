@@ -4,6 +4,7 @@ import { useTheme } from '../context/ThemeContext';
 import { FindingCard } from '../components/FindingCard';
 import { PromptApprovalDrawer } from '../components/PromptApprovalDrawer';
 import { ExportDropdown } from '../components/ExportDropdown';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import { Lightbulb, ArrowLeft, Clock, AlertTriangle, TrendingUp, Sparkles } from '../components/Icons';
 import { api } from '../lib/api';
 import type { IdeaDetail, Scout } from '../types';
@@ -15,6 +16,9 @@ export function IdeaDetailDashboard() {
   const [loading, setLoading] = useState(true);
   const [drawerScout, setDrawerScout] = useState<Scout | null>(null);
   const [deactivating, setDeactivating] = useState(false);
+  const [confirmDeactivate, setConfirmDeactivate] = useState(false);
+  const [stopTarget, setStopTarget] = useState<Scout | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
     if (!id) {
@@ -76,16 +80,30 @@ export function IdeaDetailDashboard() {
   const isInactive = idea.status === 'INACTIVE';
 
   const handleDeactivate = async () => {
-    const confirmed = window.confirm(
-      `Deactivate "${idea.title}"? Both scouts will be stopped, pending proposals rejected, and the idea marked inactive. Existing findings are kept. This cannot be undone.`
-    );
-    if (!confirmed) return;
+    setConfirmDeactivate(false);
     setDeactivating(true);
+    setActionError(null);
     try {
       await api.deactivateIdea(idea.id);
       await reload();
     } catch (err) {
-      window.alert(`Failed to deactivate idea: ${err instanceof Error ? err.message : String(err)}`);
+      setActionError(err instanceof Error ? err.message : 'Failed to deactivate idea');
+    } finally {
+      setDeactivating(false);
+    }
+  };
+
+  const handleStopConfirm = async () => {
+    if (!stopTarget) return;
+    setDeactivating(true);
+    setActionError(null);
+    try {
+      await api.stopScout(stopTarget.id);
+      setStopTarget(null);
+      await reload();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Failed to stop scout');
+      setStopTarget(null);
     } finally {
       setDeactivating(false);
     }
@@ -137,7 +155,7 @@ export function IdeaDetailDashboard() {
             {!isInactive && (
               <button
                 type="button"
-                onClick={handleDeactivate}
+                onClick={() => setConfirmDeactivate(true)}
                 disabled={deactivating}
                 className={`text-xs font-medium px-3 py-2 rounded-xl border transition-colors disabled:opacity-50 ${
                   theme === 'dark'
@@ -178,7 +196,8 @@ export function IdeaDetailDashboard() {
           findings={idea.recentPros}
           total={idea.totalPros}
           onReview={() => proScout && setDrawerScout(proScout)}
-          onStop={reload}
+          onStopRequest={() => proScout && setStopTarget(proScout)}
+          stopping={!!stopTarget && stopTarget.id === proScout?.id && deactivating}
           theme={theme}
         />
         <ScoutColumn
@@ -188,7 +207,8 @@ export function IdeaDetailDashboard() {
           findings={idea.recentCons}
           total={idea.totalCons}
           onReview={() => conScout && setDrawerScout(conScout)}
-          onStop={reload}
+          onStopRequest={() => conScout && setStopTarget(conScout)}
+          stopping={!!stopTarget && stopTarget.id === conScout?.id && deactivating}
           theme={theme}
         />
       </div>
@@ -202,6 +222,36 @@ export function IdeaDetailDashboard() {
           onResolved={() => setDrawerScout(null)}
         />
       )}
+
+      {/* Confirm Dialogs */}
+      <ConfirmDialog
+        open={confirmDeactivate}
+        title={`Deactivate "${idea.title}"?`}
+        message="Both scouts will be stopped, pending proposals rejected, and the idea marked inactive. Existing findings are kept. This cannot be undone."
+        confirmLabel="Deactivate"
+        danger
+        onConfirm={handleDeactivate}
+        onCancel={() => setConfirmDeactivate(false)}
+      />
+      <ConfirmDialog
+        open={!!stopTarget}
+        title={`Stop ${stopTarget?.scoutType === 'PRO' ? 'Pro' : 'Con'} Scout?`}
+        message="This scout will be permanently stopped. Existing findings are kept. This cannot be undone."
+        confirmLabel="Stop Scout"
+        danger
+        onConfirm={handleStopConfirm}
+        onCancel={() => setStopTarget(null)}
+      />
+
+      {/* Error Toast */}
+      {actionError && (
+        <div className={`fixed bottom-4 right-4 z-50 max-w-md px-4 py-3 rounded-xl border text-sm shadow-xl ${
+          theme === 'dark' ? 'bg-rose-500/10 border-rose-500/30 text-rose-400' : 'bg-rose-50 border-rose-200 text-rose-700'
+        }`}>
+          {actionError}
+          <button onClick={() => setActionError(null)} className="ml-3 underline">Dismiss</button>
+        </div>
+      )}
     </div>
   );
 }
@@ -213,37 +263,20 @@ interface ScoutColumnProps {
   findings: IdeaDetail['recentPros'];
   total: number;
   onReview: () => void;
-  onStop: () => void;
+  onStopRequest: () => void;
+  stopping?: boolean;
   theme: 'dark' | 'light';
 }
 
-function ScoutColumn({ title, polarity, scout, findings, total, onReview, onStop, theme }: ScoutColumnProps) {
+function ScoutColumn({ title, polarity, scout, findings, total, onReview, onStopRequest, stopping, theme }: ScoutColumnProps) {
   const isPro = polarity === 'pro';
   const pendingMutation = scout?.status === 'PENDING_MUTATION' && scout?.pendingProposal;
   const undeployed = !scout || scout.status === 'UNDEPLOYED';
   const stopped = scout?.status === 'STOPPED';
-  const [stopping, setStopping] = useState(false);
 
   const accent = isPro
     ? { ring: theme === 'dark' ? 'border-emerald-500/30' : 'border-emerald-200', dot: 'bg-emerald-500', text: theme === 'dark' ? 'text-emerald-400' : 'text-emerald-700', soft: theme === 'dark' ? 'bg-emerald-500/5' : 'bg-emerald-50/50' }
     : { ring: theme === 'dark' ? 'border-rose-500/30' : 'border-rose-200', dot: 'bg-rose-500', text: theme === 'dark' ? 'text-rose-400' : 'text-rose-700', soft: theme === 'dark' ? 'bg-rose-500/5' : 'bg-rose-50/50' };
-
-  const handleStop = async () => {
-    if (!scout) return;
-    const confirmed = window.confirm(
-      `Stop this ${isPro ? 'Pro' : 'Con'} scout? It will be permanently stopped. Existing findings are kept. This cannot be undone.`
-    );
-    if (!confirmed) return;
-    setStopping(true);
-    try {
-      await api.stopScout(scout.id);
-      onStop();
-    } catch (err) {
-      window.alert(`Failed to stop scout: ${err instanceof Error ? err.message : String(err)}`);
-    } finally {
-      setStopping(false);
-    }
-  };
 
   return (
     <div className={`p-5 rounded-2xl border-2 transition-all duration-300 ${accent.ring} ${accent.soft}`}>
@@ -276,7 +309,7 @@ function ScoutColumn({ title, polarity, scout, findings, total, onReview, onStop
         {!undeployed && !stopped && scout && (
           <button
             type="button"
-            onClick={handleStop}
+            onClick={onStopRequest}
             disabled={stopping}
             className={`text-xs font-medium px-2.5 py-1 rounded-md transition-colors disabled:opacity-50 ${
               theme === 'dark'
