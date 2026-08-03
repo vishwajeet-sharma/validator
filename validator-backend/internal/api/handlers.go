@@ -6,8 +6,6 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/google/uuid"
-
 	"validator-backend/internal/models"
 	"validator-backend/internal/workflow"
 )
@@ -17,54 +15,6 @@ type createIdeaRequest struct {
 	Title                 *string `json:"title,omitempty"`
 	Description           string  `json:"description"`
 	ScoutingFrequencyDays int     `json:"scoutingFrequencyDays"`
-}
-
-// handlePostIdea persists a new idea and asynchronously starts the Day 0 setup
-// workflow. Returns 202 Accepted.
-func (s *Server) handlePostIdea(w http.ResponseWriter, r *http.Request) {
-	var req createIdeaRequest
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
-		return
-	}
-	desc := strings.TrimSpace(req.Description)
-	if desc == "" {
-		writeError(w, http.StatusBadRequest, "description is required")
-		return
-	}
-	if req.ScoutingFrequencyDays <= 0 {
-		req.ScoutingFrequencyDays = 7
-	}
-
-	title := ""
-	if req.Title != nil && strings.TrimSpace(*req.Title) != "" {
-		title = strings.TrimSpace(*req.Title)
-	} else {
-		title = deriveTitle(desc)
-	}
-
-	idea := &models.Idea{
-		ID:            uuid.NewString(),
-		Title:         title,
-		Description:   desc,
-		FrequencyDays: req.ScoutingFrequencyDays,
-		Status:        models.IdeaStatusInitialSweep,
-	}
-	if err := s.DB.CreateIdea(r.Context(), idea); err != nil {
-		slog.Error("persist idea failed", "err", err)
-		writeError(w, http.StatusInternalServerError, "could not persist idea")
-		return
-	}
-
-	// Fire-and-forget the Day 0 workflow; trigger failures never fail the HTTP
-	// request because the idea is already persisted and can be retried.
-	_ = s.triggerDay0(idea.ID, idea.Title, idea.Description, idea.FrequencyDays)
-
-	writeJSON(w, http.StatusAccepted, map[string]any{
-		"id":         idea.ID,
-		"status":     string(idea.Status),
-		"workflowId": idea.ID,
-	})
 }
 
 // handleListIdeas returns all tracked ideas with their scout statuses.
@@ -162,9 +112,10 @@ func (s *Server) handleGetIdea(w http.ResponseWriter, r *http.Request) {
 			CreatedAt:             rfc3339(idea.CreatedAt),
 			LastUpdated:           rfc3339(idea.UpdatedAt),
 		},
-		Scouts:     scoutsForDetail(scouts, proposals),
-		RecentPros: pros,
-		RecentCons: cons,
+		Scouts:        scoutsForDetail(scouts, proposals),
+		RecentPros:    pros,
+		RecentCons:    cons,
+		RefinedPrompt: idea.RefinedPrompt,
 	}
 	writeJSON(w, http.StatusOK, detail)
 }

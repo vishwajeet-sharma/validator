@@ -1,4 +1,6 @@
 import type {
+  ChatResponse,
+  Conversation,
   CreateIdeaResponse,
   IdeaDetail,
   IdeaSummary,
@@ -67,9 +69,29 @@ export const api = {
   getIdea: (id: string) => request<IdeaDetail>(`/api/ideas/${encodeURIComponent(id)}`),
 
   createIdea: (form: NewIdeaForm) =>
-    request<CreateIdeaResponse>('/api/ideas', {
+    request<Conversation>('/api/ideas', {
       method: 'POST',
       body: JSON.stringify(form),
+    }),
+
+  chat: (ideaId: string, message: string) =>
+    request<ChatResponse>(`/api/ideas/${encodeURIComponent(ideaId)}/chat`, {
+      method: 'POST',
+      body: JSON.stringify({ message }),
+    }),
+
+  getConversation: (ideaId: string) =>
+    request<Conversation>(`/api/ideas/${encodeURIComponent(ideaId)}/conversation`),
+
+  updatePrompt: (ideaId: string, prompt: string) =>
+    request<{ status: string }>(`/api/ideas/${encodeURIComponent(ideaId)}/prompt`, {
+      method: 'PUT',
+      body: JSON.stringify({ prompt }),
+    }),
+
+  startResearch: (ideaId: string) =>
+    request<CreateIdeaResponse>(`/api/ideas/${encodeURIComponent(ideaId)}/start-research`, {
+      method: 'POST',
     }),
 
   respondProposal: (proposalId: string, body: ProposalResponseRequest) =>

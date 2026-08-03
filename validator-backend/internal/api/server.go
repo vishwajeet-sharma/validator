@@ -14,19 +14,21 @@ import (
 	restateingress "github.com/restatedev/sdk-go/ingress"
 
 	"validator-backend/internal/db"
+	"validator-backend/internal/llm"
 	"validator-backend/internal/workflow"
 )
 
-// Server wires together the database store and the Restate ingress client used
-// to trigger the Day 0 workflow and forward webhooks to the worker.
+// Server wires together the database store, the Restate ingress client, and the
+// LLM client used for the idea refinement conversation.
 type Server struct {
 	DB            *db.Store
 	IngressClient *restateingress.Client
+	LLM           *llm.Client
 }
 
 // NewServer returns a configured Server.
-func NewServer(store *db.Store, ingress *restateingress.Client) *Server {
-	return &Server{DB: store, IngressClient: ingress}
+func NewServer(store *db.Store, ingress *restateingress.Client, llmClient *llm.Client) *Server {
+	return &Server{DB: store, IngressClient: ingress, LLM: llmClient}
 }
 
 // Routes returns an http.Handler with all REST endpoints registered.
@@ -35,6 +37,10 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/ideas", s.handleListIdeas)
 	mux.HandleFunc("POST /api/ideas", s.handlePostIdea)
 	mux.HandleFunc("GET /api/ideas/{id}", s.handleGetIdea)
+	mux.HandleFunc("POST /api/ideas/{id}/chat", s.handleChat)
+	mux.HandleFunc("GET /api/ideas/{id}/conversation", s.handleGetConversation)
+	mux.HandleFunc("PUT /api/ideas/{id}/prompt", s.handleUpdatePrompt)
+	mux.HandleFunc("POST /api/ideas/{id}/start-research", s.handleStartResearch)
 	mux.HandleFunc("POST /api/proposals/{id}/respond", s.handleRespondProposal)
 	mux.HandleFunc("DELETE /api/scouts/{id}", s.handleDeleteScout)
 	mux.HandleFunc("DELETE /api/ideas/{id}", s.handleDeactivateIdea)
@@ -60,7 +66,7 @@ func (s *Server) withCORS(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
 		h.Set("Access-Control-Allow-Origin", "*")
-		h.Set("Access-Control-Allow-Methods", "GET, POST, PATCH, OPTIONS")
+		h.Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 		h.Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 		h.Set("Access-Control-Max-Age", "600")
 		if r.Method == http.MethodOptions {

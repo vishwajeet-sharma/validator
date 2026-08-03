@@ -20,6 +20,7 @@ import (
 	"validator-backend/internal/api"
 	"validator-backend/internal/config"
 	"validator-backend/internal/db"
+	"validator-backend/internal/llm"
 )
 
 func main() {
@@ -51,7 +52,11 @@ func main() {
 	}
 	ingressClient := restateingress.NewClient(cfg.RestateIngressURL, ingressOpts...)
 
-	apiServer := api.NewServer(store, ingressClient)
+	chatLLM := llm.New(cfg.LLMAPIBase, cfg.LLMAPIKey, cfg.LLMChatModel, cfg.LLMTimeout)
+	slog.Info("chat llm client", "configured", chatLLM.Configured(),
+		"model", cfg.LLMChatModel, "base", cfg.LLMAPIBase)
+
+	apiServer := api.NewServer(store, ingressClient, chatLLM)
 	httpSrv := &http.Server{
 		Addr:              cfg.HTTPAddr,
 		Handler:           apiServer.Routes(),

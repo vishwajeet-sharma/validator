@@ -154,6 +154,7 @@ export const mockIdeaDetail: IdeaDetail = {
   scouts: mockScouts,
   recentPros: mockProFindings,
   recentCons: mockConFindings,
+  refinedPrompt: '## Research Brief: AI Code Review for Engineering Teams\n\n**Target Market:** Mid-size engineering teams (50-500 developers)',
 };
 
 export const mockScoutWithProposal: Scout = mockScouts[1];

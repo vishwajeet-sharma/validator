@@ -3,7 +3,7 @@
 
 export type ScoutType = 'PRO' | 'CON';
 export type ScoutStatus = 'ACTIVE' | 'PENDING_MUTATION' | 'UNDEPLOYED' | 'STOPPED';
-export type IdeaStatus = 'INITIAL_SWEEP' | 'ACTIVE' | 'INACTIVE';
+export type IdeaStatus = 'DRAFT' | 'INITIAL_SWEEP' | 'ACTIVE' | 'INACTIVE';
 export type ProposalStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
 
 export interface Proposal {
@@ -50,6 +50,7 @@ export interface IdeaDetail extends IdeaSummary {
   scouts: Scout[];
   recentPros: Finding[];
   recentCons: Finding[];
+  refinedPrompt: string;
 }
 
 export interface NewIdeaForm {
@@ -68,4 +69,25 @@ export type ProposalAction = 'APPROVE' | 'REJECT';
 export interface ProposalResponseRequest {
   action: ProposalAction;
   edited_text?: string;
+}
+
+export interface ChatMessage {
+  role: string;
+  content: string;
+  messageType?: string;
+  timestamp: string;
+}
+
+export interface Conversation {
+  id: string;
+  title: string;
+  status: string;
+  conversation: ChatMessage[];
+  refinedPrompt: string;
+}
+
+export interface ChatResponse {
+  message: ChatMessage;
+  prompt?: string;
+  status: string;
 }

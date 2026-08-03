@@ -6,6 +6,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -99,6 +100,13 @@ ALTER TABLE scouts ADD CONSTRAINT scouts_status_check
     CHECK (status IN ('ACTIVE', 'PENDING_MUTATION', 'STOPPED'));
 `
 
+// ideaSchemaMigration adds the conversation and refined_prompt columns to the
+// ideas table and widens the status to include 'DRAFT'. Idempotent.
+const ideaSchemaMigration = `
+ALTER TABLE ideas ADD COLUMN IF NOT EXISTS conversation JSONB DEFAULT '[]'::jsonb;
+ALTER TABLE ideas ADD COLUMN IF NOT EXISTS refined_prompt TEXT DEFAULT '';
+`
+
 // Store is the database access facade.
 type Store struct {
 	db *sql.DB
@@ -134,6 +142,11 @@ func New(ctx context.Context, databaseURL string) (*Store, error) {
 		return nil, fmt.Errorf("apply scout status migration: %w", err)
 	}
 
+	if _, err := db.ExecContext(ctx, ideaSchemaMigration); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("apply idea schema migration: %w", err)
+	}
+
 	slog.Info("database connected and schema applied")
 	return &Store{db: db}, nil
 }
@@ -147,11 +160,12 @@ func (s *Store) Close() error { return s.db.Close() }
 // stored row (including generated timestamps).
 func (s *Store) CreateIdea(ctx context.Context, idea *models.Idea) error {
 	const q = `
-INSERT INTO ideas (id, title, description, frequency_days, status, created_at, updated_at)
-VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
+INSERT INTO ideas (id, title, description, frequency_days, status, conversation, refined_prompt, created_at, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
 RETURNING created_at, updated_at`
 	row := s.db.QueryRowContext(ctx, q,
-		idea.ID, idea.Title, idea.Description, idea.FrequencyDays, idea.Status)
+		idea.ID, idea.Title, idea.Description, idea.FrequencyDays, idea.Status,
+		`[]`, idea.RefinedPrompt)
 	if err := row.Scan(&idea.CreatedAt, &idea.UpdatedAt); err != nil {
 		return fmt.Errorf("insert idea: %w", err)
 	}
@@ -161,7 +175,7 @@ RETURNING created_at, updated_at`
 // GetIdea loads a single idea by id.
 func (s *Store) GetIdea(ctx context.Context, id string) (*models.Idea, error) {
 	const q = `
-SELECT id, title, description, frequency_days, status, total_pros, total_cons, created_at, updated_at
+SELECT id, title, description, frequency_days, status, total_pros, total_cons, conversation, refined_prompt, created_at, updated_at
 FROM ideas WHERE id = $1`
 	row := s.db.QueryRowContext(ctx, q, id)
 	idea, err := scanIdea(row)
@@ -177,7 +191,7 @@ FROM ideas WHERE id = $1`
 // ListIdeas returns all tracked ideas, newest first.
 func (s *Store) ListIdeas(ctx context.Context) ([]*models.Idea, error) {
 	const q = `
-SELECT id, title, description, frequency_days, status, total_pros, total_cons, created_at, updated_at
+SELECT id, title, description, frequency_days, status, total_pros, total_cons, conversation, refined_prompt, created_at, updated_at
 FROM ideas ORDER BY created_at DESC`
 	rows, err := s.db.QueryContext(ctx, q)
 	if err != nil {
@@ -209,6 +223,49 @@ func (s *Store) ActivateIdea(ctx context.Context, ideaID string) error {
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
 		return fmt.Errorf("%w: idea %s", ErrNotFound, ideaID)
+	}
+	return nil
+}
+
+// UpdateConversation replaces the conversation JSONB for an idea.
+func (s *Store) UpdateConversation(ctx context.Context, ideaID string, messages []models.ChatMessage) error {
+	data, err := json.Marshal(messages)
+	if err != nil {
+		return fmt.Errorf("marshal conversation: %w", err)
+	}
+	const q = `UPDATE ideas SET conversation = $2, updated_at = NOW() WHERE id = $1`
+	res, err := s.db.ExecContext(ctx, q, ideaID, data)
+	if err != nil {
+		return fmt.Errorf("update conversation: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("%w: idea %s", ErrNotFound, ideaID)
+	}
+	return nil
+}
+
+// UpdateRefinedPrompt sets the synthesized research prompt for an idea.
+func (s *Store) UpdateRefinedPrompt(ctx context.Context, ideaID, prompt string) error {
+	const q = `UPDATE ideas SET refined_prompt = $2, updated_at = NOW() WHERE id = $1`
+	res, err := s.db.ExecContext(ctx, q, ideaID, prompt)
+	if err != nil {
+		return fmt.Errorf("update refined prompt: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("%w: idea %s", ErrNotFound, ideaID)
+	}
+	return nil
+}
+
+// StartResearch transitions an idea from DRAFT to INITIAL_SWEEP.
+func (s *Store) StartResearch(ctx context.Context, ideaID string) error {
+	const q = `UPDATE ideas SET status = $2, updated_at = NOW() WHERE id = $1 AND status = $3`
+	res, err := s.db.ExecContext(ctx, q, ideaID, models.IdeaStatusInitialSweep, models.IdeaStatusDraft)
+	if err != nil {
+		return fmt.Errorf("start research: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("%w: idea %s (not in DRAFT status)", ErrNotFound, ideaID)
 	}
 	return nil
 }
@@ -630,9 +687,15 @@ type scanner interface {
 
 func scanIdea(s scanner) (*models.Idea, error) {
 	var idea models.Idea
+	var conversationBytes []byte
 	if err := s.Scan(&idea.ID, &idea.Title, &idea.Description, &idea.FrequencyDays,
-		&idea.Status, &idea.TotalPros, &idea.TotalCons, &idea.CreatedAt, &idea.UpdatedAt); err != nil {
+		&idea.Status, &idea.TotalPros, &idea.TotalCons,
+		&conversationBytes, &idea.RefinedPrompt,
+		&idea.CreatedAt, &idea.UpdatedAt); err != nil {
 		return nil, err
+	}
+	if len(conversationBytes) > 0 {
+		_ = json.Unmarshal(conversationBytes, &idea.Conversation)
 	}
 	return &idea, nil
 }

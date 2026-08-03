@@ -124,7 +124,7 @@ cmd_restate() {
     log "restate: creating container $RESTATE_NAME on :$RESTATE_INGRESS/:$RESTATE_META"
     $DOCKER run -d --name "$RESTATE_NAME" \
       -p "$RESTATE_INGRESS:8080" -p "$RESTATE_META:9070" \
-      -e RESTATE_LOG_FORMAT=compact -v "$RESTATE_VOLUME:/restate-data" "$RESTATE_IMAGE"
+      -e RESTATE_LOG_FORMAT=compact -e RESTATE_NODE=validator -v "$RESTATE_VOLUME:/restate-data" "$RESTATE_IMAGE"
   fi
   wait_port "$RESTATE_META" restate-meta
 }
@@ -134,6 +134,7 @@ cmd_infra() { cmd_env_sync; cmd_db; cmd_restate; }
 cmd_register() {
   wait_port "$RESTATE_META" restate-meta
   wait_port "$WORKER_PORT" worker
+  restate config use-environment local 2>/dev/null || true
   log "restate: registering http://$WORKER_HOST:$WORKER_PORT ..."
   if ! restate deployments register "http://$WORKER_HOST:$WORKER_PORT" --yes; then
     log "restate: register failed. If components changed shape, re-run:"
@@ -188,8 +189,7 @@ cmd_stop_apps() {
 cmd_down() {
   cmd_stop_apps
   $DOCKER stop "$PG_NAME" "$RESTATE_NAME" >/dev/null 2>&1 || true
-  $DOCKER rm   "$PG_NAME" "$RESTATE_NAME" >/dev/null 2>&1 || true
-  log "containers + apps stopped (volumes kept). './dev.sh clean' to wipe data."
+  log "containers + apps stopped (use './dev.sh clean' to remove containers + wipe data)"
 }
 
 cmd_clean() {

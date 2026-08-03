@@ -28,6 +28,7 @@ import {
   Plus,
   Globe,
   Trash2,
+  Edit3,
 } from 'lucide-react';
 
 const ValidatorLogo = ({ className }: { className?: string }) => (
@@ -103,6 +104,7 @@ export {
   Plus,
   Globe,
   Trash2,
+  Edit3,
   ValidatorLogo,
   InstagramIcon,
   TwitterIcon,

@@ -17,6 +17,7 @@ const (
 type IdeaStatus string
 
 const (
+	IdeaStatusDraft        IdeaStatus = "DRAFT"
 	IdeaStatusInitialSweep IdeaStatus = "INITIAL_SWEEP"
 	IdeaStatusActive       IdeaStatus = "ACTIVE"
 	IdeaStatusInactive     IdeaStatus = "INACTIVE"
@@ -49,8 +50,18 @@ type Idea struct {
 	Status        IdeaStatus
 	TotalPros     int
 	TotalCons     int
+	Conversation  []ChatMessage
+	RefinedPrompt string
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
+}
+
+// ChatMessage is a single message in the idea refinement conversation.
+type ChatMessage struct {
+	Role       string    `json:"role"`
+	Content    string    `json:"content"`
+	MessageType string   `json:"messageType,omitempty"`
+	Timestamp  time.Time `json:"timestamp"`
 }
 
 // Scout is a single Yutori scouting task (PRO or CON) attached to an idea.

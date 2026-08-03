@@ -63,10 +63,21 @@ type chatMessage struct {
 	Content string `json:"content"`
 }
 
+// Message is a public conversation message for multi-turn calls.
+type Message struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
+type responseFormat struct {
+	Type string `json:"type"`
+}
+
 type chatRequest struct {
-	Model       string        `json:"model"`
-	Messages    []chatMessage `json:"messages"`
-	Temperature float64       `json:"temperature,omitempty"`
+	Model          string          `json:"model"`
+	Messages       []chatMessage   `json:"messages"`
+	Temperature    float64         `json:"temperature,omitempty"`
+	ResponseFormat *responseFormat `json:"response_format,omitempty"`
 }
 
 type chatResponse struct {
@@ -108,6 +119,58 @@ func (c *Client) Complete(ctx context.Context, system, user string) (string, err
 	}
 	defer resp.Body.Close() //nolint:errcheck
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20)) // 1 MiB cap
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("llm: status %d: %s", resp.StatusCode, truncate(string(body), 512))
+	}
+	var out chatResponse
+	if err := json.Unmarshal(body, &out); err != nil {
+		return "", fmt.Errorf("llm: decode response: %w", err)
+	}
+	if out.Error != nil && out.Error.Message != "" {
+		return "", fmt.Errorf("llm: api error: %s", out.Error.Message)
+	}
+	if len(out.Choices) == 0 {
+		return "", fmt.Errorf("llm: empty choices")
+	}
+	return out.Choices[0].Message.Content, nil
+}
+
+// CompleteConversation sends a multi-turn conversation with a system prompt and
+// returns the assistant's response. When jsonMode is true, the response is
+// forced to be a JSON object (OpenAI response_format).
+func (c *Client) CompleteConversation(ctx context.Context, system string, messages []Message, jsonMode bool) (string, error) {
+	if !c.Configured() {
+		return "", ErrNotConfigured
+	}
+	msgs := make([]chatMessage, 0, len(messages)+1)
+	msgs = append(msgs, chatMessage{Role: "system", Content: system})
+	for _, m := range messages {
+		msgs = append(msgs, chatMessage{Role: m.Role, Content: m.Content})
+	}
+	reqBody := chatRequest{
+		Model:       c.model,
+		Messages:    msgs,
+		Temperature: 0.7,
+	}
+	if jsonMode {
+		reqBody.ResponseFormat = &responseFormat{Type: "json_object"}
+	}
+	raw, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", fmt.Errorf("llm: marshal request: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/chat/completions", bytes.NewReader(raw))
+	if err != nil {
+		return "", fmt.Errorf("llm: build request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("llm: request: %w", err)
+	}
+	defer resp.Body.Close() //nolint:errcheck
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return "", fmt.Errorf("llm: status %d: %s", resp.StatusCode, truncate(string(body), 512))
 	}

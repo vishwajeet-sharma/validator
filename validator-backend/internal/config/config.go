@@ -52,10 +52,11 @@ type Config struct {
 	// does NOT use the Yutori Research API (which is paid and reserved for Day 0
 	// research + recurring scouts). When LLM_API_KEY is empty the mutation eval
 	// is skipped gracefully (no external call, no proposal).
-	LLMAPIBase string
-	LLMAPIKey  string
-	LLMModel   string
-	LLMTimeout time.Duration
+	LLMAPIBase  string
+	LLMAPIKey   string
+	LLMModel    string
+	LLMChatModel string
+	LLMTimeout  time.Duration
 
 	// ScoutIntervalSeconds overrides the recurring-scout output_interval so
 	// local testing gets fresh data quickly instead of waiting days. 0 = use the
@@ -88,6 +89,7 @@ func Load() (Config, error) {
 		LLMAPIBase:            strings.TrimRight(envOrDefault("LLM_API_BASE", "https://api.openai.com/v1"), "/"),
 		LLMAPIKey:             strings.TrimSpace(os.Getenv("LLM_API_KEY")),
 		LLMModel:              envOrDefault("LLM_MODEL", "gpt-4o-mini"),
+		LLMChatModel:          envOrDefault("LLM_CHAT_MODEL", "gpt-4o"),
 		LLMTimeout:            time.Duration(envIntOrDefault("LLM_TIMEOUT_SECONDS", 30)) * time.Second,
 		ScoutIntervalSeconds:  envIntOrDefault("SCOUT_INTERVAL_SECONDS", 0),
 	}

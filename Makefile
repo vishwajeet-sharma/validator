@@ -77,8 +77,7 @@ up: infra start-api start-worker register ## Start Postgres + Restate (docker), 
 
 down: stop-apps ## Stop containers + app processes (keeps data volumes)
 	-@$(DOCKER) stop $(PG_NAME) $(RESTATE_NAME) 2>/dev/null || true
-	-@$(DOCKER) rm $(PG_NAME) $(RESTATE_NAME) 2>/dev/null || true
-	@echo "containers + apps stopped (volumes kept). 'make clean' to wipe data."
+	@echo "containers + apps stopped (use 'make clean' to remove containers + wipe data)"
 
 restart: down ## Restart the whole stack
 	@$(MAKE) --no-print-directory up
@@ -119,7 +118,8 @@ restate: ## Start the Restate runtime container
 	 else echo "restate: creating container $(RESTATE_NAME) on :$(RESTATE_INGRESS)/:$(RESTATE_META)"; \
 	   $(DOCKER) run -d --name $(RESTATE_NAME) \
 	     -p $(RESTATE_INGRESS):8080 -p $(RESTATE_META):9070 \
-	     -e RESTATE_LOG_FORMAT=compact -v $(RESTATE_VOLUME):/restate-data $(RESTATE_IMAGE); \
+	     -e RESTATE_LOG_FORMAT=compact -e RESTATE_NODE=validator \
+	     -v $(RESTATE_VOLUME):/restate-data $(RESTATE_IMAGE); \
 	 fi
 	@$(MAKE) --no-print-directory wait-port PORT=$(RESTATE_META) WHAT=restate-meta
 
@@ -173,6 +173,7 @@ start-ui:
 register: ## Register the worker deployment with the Restate runtime
 	@$(MAKE) --no-print-directory wait-port PORT=$(RESTATE_META) WHAT=restate-meta
 	@$(MAKE) --no-print-directory wait-port PORT=$(WORKER_PORT) WHAT=worker
+	@restate config use-environment local 2>/dev/null || true
 	@echo "restate: registering http://$(WORKER_HOST):$(WORKER_PORT) ..."
 	@restate deployments register http://$(WORKER_HOST):$(WORKER_PORT) --yes \
 	   || { echo "restate: register failed. If components changed shape, re-run: restate deployments register http://$(WORKER_HOST):$(WORKER_PORT) --force --yes"; exit 1; }
@@ -235,6 +236,7 @@ stop-apps: ## Stop backgrounded api/worker/ui (pidfiles + stray sweep)
 	@-pkill -x worker 2>/dev/null || true
 
 clean: down ## Stop everything and wipe containers, data volumes, build artifacts, logs
+	-@$(DOCKER) rm -f $(PG_NAME) $(RESTATE_NAME) 2>/dev/null || true
 	-@$(DOCKER) volume rm $(PG_VOLUME) $(RESTATE_VOLUME) 2>/dev/null || true
 	@rm -rf $(LOGDIR) $(BACKEND)/bin
 	@echo "cleaned: containers, volumes, logs, binaries"

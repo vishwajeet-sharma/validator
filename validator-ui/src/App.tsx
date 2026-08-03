@@ -2,7 +2,7 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { ThemeProvider } from './context/ThemeContext';
 import { Layout } from './components/Layout';
 import { Dashboard } from './pages/Dashboard';
-import { NewIdeaForm } from './pages/NewIdeaForm';
+import { NewIdeaRefinement } from './pages/NewIdeaRefinement';
 import { IdeaDetailDashboard } from './pages/IdeaDetailDashboard';
 
 function App() {
@@ -12,7 +12,8 @@ function App() {
         <Layout>
           <Routes>
             <Route path="/" element={<Dashboard />} />
-            <Route path="/new" element={<NewIdeaForm />} />
+            <Route path="/new" element={<NewIdeaRefinement />} />
+            <Route path="/refine/:id" element={<NewIdeaRefinement />} />
             <Route path="/idea/:id" element={<IdeaDetailDashboard />} />
           </Routes>
         </Layout>

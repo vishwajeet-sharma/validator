@@ -3,6 +3,7 @@ import { useParams, Link } from 'react-router-dom';
 import { useTheme } from '../context/ThemeContext';
 import { FindingCard } from '../components/FindingCard';
 import { PromptApprovalDrawer } from '../components/PromptApprovalDrawer';
+import { ExportDropdown } from '../components/ExportDropdown';
 import { Lightbulb, ArrowLeft, Clock, AlertTriangle, TrendingUp, Sparkles } from '../components/Icons';
 import { api } from '../lib/api';
 import type { IdeaDetail, Scout } from '../types';
@@ -130,6 +131,8 @@ export function IdeaDetailDashboard() {
                 {isInactive ? 'Inactive' : isInitialSweep ? 'Deploying Scouts…' : 'Active'}
               </span>
             </div>
+            {/* Export dropdown */}
+            <ExportDropdown idea={idea} />
             {/* Deactivate control: only while the idea is live. */}
             {!isInactive && (
               <button

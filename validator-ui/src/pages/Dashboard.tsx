@@ -45,7 +45,7 @@ function IdeaCard({ idea }: { idea: IdeaSummary }) {
 
   return (
     <Link
-      to={`/idea/${idea.id}`}
+      to={idea.status === 'DRAFT' ? `/refine/${idea.id}` : `/idea/${idea.id}`}
       className={`group block p-5 rounded-2xl border transition-all duration-300 hover:scale-[1.02] hover:shadow-xl ${
         theme === 'dark' ? 'bg-zinc-900 border-zinc-800 hover:border-zinc-700' : 'bg-white border-zinc-200 hover:border-zinc-300 hover:shadow-lg'
       }`}
@@ -63,11 +63,13 @@ function IdeaCard({ idea }: { idea: IdeaSummary }) {
 
       <div className="flex items-center gap-3 mb-4 flex-wrap">
         <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full ${
-          idea.status === 'INITIAL_SWEEP'
-            ? theme === 'dark' ? 'bg-sky-500/20 text-sky-400' : 'bg-sky-100 text-sky-600'
-            : theme === 'dark' ? 'bg-zinc-800 text-zinc-400' : 'bg-zinc-100 text-zinc-600'
+          idea.status === 'DRAFT'
+            ? theme === 'dark' ? 'bg-violet-500/20 text-violet-400' : 'bg-violet-100 text-violet-600'
+            : idea.status === 'INITIAL_SWEEP'
+              ? theme === 'dark' ? 'bg-sky-500/20 text-sky-400' : 'bg-sky-100 text-sky-600'
+              : theme === 'dark' ? 'bg-zinc-800 text-zinc-400' : 'bg-zinc-100 text-zinc-600'
         }`}>
-          {idea.status === 'INITIAL_SWEEP' ? 'Deploying' : `Every ${idea.scoutingFrequencyDays}d`}
+          {idea.status === 'DRAFT' ? 'Draft' : idea.status === 'INITIAL_SWEEP' ? 'Deploying' : `Every ${idea.scoutingFrequencyDays}d`}
         </span>
         <span className="flex items-center gap-1.5 text-xs">
           <span className={theme === 'dark' ? 'text-zinc-500' : 'text-zinc-400'}>Pro</span>

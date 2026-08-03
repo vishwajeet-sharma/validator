@@ -58,9 +58,10 @@ type IdeaSummaryDTO struct {
 // two scouts and the most recent pro/con findings.
 type IdeaDetailDTO struct {
 	IdeaSummaryDTO
-	Scouts     []ScoutDTO   `json:"scouts"`
-	RecentPros []FindingDTO `json:"recentPros"`
-	RecentCons []FindingDTO `json:"recentCons"`
+	Scouts        []ScoutDTO   `json:"scouts"`
+	RecentPros    []FindingDTO `json:"recentPros"`
+	RecentCons    []FindingDTO `json:"recentCons"`
+	RefinedPrompt string       `json:"refinedPrompt"`
 }
 
 // BuildScoutDTO assembles a scout DTO with its pending proposal (if any).
@@ -160,4 +161,40 @@ func truncateRunes(s string, n int) string {
 	}
 	rs := []rune(s)
 	return string(rs[:n]) + "…"
+}
+
+// --- Conversation DTOs ----------------------------------------------------
+
+// ChatMessageDTO is a single message in the idea refinement conversation.
+type ChatMessageDTO struct {
+	Role        string `json:"role"`
+	Content     string `json:"content"`
+	MessageType string `json:"messageType,omitempty"`
+	Timestamp   string `json:"timestamp"`
+}
+
+// ConversationDTO is the conversation + refined prompt for an idea.
+type ConversationDTO struct {
+	ID            string           `json:"id"`
+	Title         string           `json:"title"`
+	Status        string           `json:"status"`
+	Conversation  []ChatMessageDTO `json:"conversation"`
+	RefinedPrompt string           `json:"refinedPrompt"`
+}
+
+// ChatRequestDTO is the body for POST /api/ideas/{id}/chat.
+type ChatRequestDTO struct {
+	Message string `json:"message"`
+}
+
+// ChatResponseDTO is the response from a chat message.
+type ChatResponseDTO struct {
+	Message     ChatMessageDTO `json:"message"`
+	Prompt      string         `json:"prompt,omitempty"`
+	Status      string         `json:"status"`
+}
+
+// PromptUpdateDTO is the body for PUT /api/ideas/{id}/prompt.
+type PromptUpdateDTO struct {
+	Prompt string `json:"prompt"`
 }
