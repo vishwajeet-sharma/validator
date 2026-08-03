@@ -77,7 +77,7 @@ export function IdeaDetailDashboard() {
 
   const handleDeactivate = async () => {
     const confirmed = window.confirm(
-      `Deactivate "${idea.title}"? Both scouts will be stopped on Yutori (halting credit usage), pending proposals rejected, and the idea marked inactive. Existing findings are kept. This cannot be undone.`
+      `Deactivate "${idea.title}"? Both scouts will be stopped, pending proposals rejected, and the idea marked inactive. Existing findings are kept. This cannot be undone.`
     );
     if (!confirmed) return;
     setDeactivating(true);
@@ -144,7 +144,7 @@ export function IdeaDetailDashboard() {
                     ? 'text-zinc-400 border-zinc-700 hover:text-rose-300 hover:border-rose-500/40 hover:bg-rose-500/10'
                     : 'text-zinc-500 border-zinc-300 hover:text-rose-600 hover:border-rose-300 hover:bg-rose-50'
                 }`}
-                title="Deactivate this idea: stop both scouts on Yutori and mark it inactive"
+                title="Deactivate this idea: stop both scouts and mark it inactive"
               >
                 {deactivating ? 'Deactivating…' : 'Deactivate'}
               </button>
@@ -231,7 +231,7 @@ function ScoutColumn({ title, polarity, scout, findings, total, onReview, onStop
   const handleStop = async () => {
     if (!scout) return;
     const confirmed = window.confirm(
-      `Stop this ${isPro ? 'Pro' : 'Con'} scout? It will be deleted on Yutori and stop consuming credits. Existing findings are kept. This cannot be undone.`
+      `Stop this ${isPro ? 'Pro' : 'Con'} scout? It will be permanently stopped. Existing findings are kept. This cannot be undone.`
     );
     if (!confirmed) return;
     setStopping(true);
@@ -283,7 +283,7 @@ function ScoutColumn({ title, polarity, scout, findings, total, onReview, onStop
                 ? 'text-zinc-400 hover:text-rose-300 hover:bg-rose-500/10'
                 : 'text-zinc-500 hover:text-rose-600 hover:bg-rose-50'
             }`}
-            title="Stop this scout and delete it on Yutori (halts credit usage)"
+            title="Stop this scout permanently"
           >
             {stopping ? 'Stopping…' : 'Stop scout'}
           </button>

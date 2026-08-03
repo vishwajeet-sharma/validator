@@ -110,7 +110,7 @@ export function PromptApprovalDrawer({ scout, onClose, onResolved }: PromptAppro
               }`}
             />
             <p className={`mt-2 text-xs ${theme === 'dark' ? 'text-zinc-500' : 'text-zinc-400'}`}>
-              Fine-tune the prompt before approving — add your own angles or constraints. Approving updates the live Yutori scout.
+              Fine-tune the prompt before approving — add your own angles or constraints. Approving updates the active scout.
             </p>
           </div>
 
